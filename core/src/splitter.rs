@@ -1,10 +1,20 @@
 //! Cuts the stream of lines into segments: one boss pull, or one Mythic+ key.
 //!
-//! A segment is the file's header line (`COMBAT_LOG_VERSION…`), then every
+//! A segment is the file's header line (`COMBAT_LOG_VERSION…`), then the
+//! file's latest `ZONE_CHANGE` before the segment (its zone line), then every
 //! line from `ENCOUNTER_START` to `ENCOUNTER_END`, or from
 //! `CHALLENGE_MODE_START` to `CHALLENGE_MODE_END`, byte for byte. Its SHA-256
 //! is of exactly those bytes, uncompressed, which is what the server
-//! de-duplicates on.
+//! de-duplicates on (and checks the upload against).
+//!
+//! The zone line is carried forward because the game writes `ZONE_CHANGE`
+//! when the player enters the instance, well before the first pull: without
+//! it, almost no raid segment names its raid, and the site shows "Unnamed
+//! raid" (#343; `logs.zones`). It's copied unchanged, like the header, and
+//! the server's parser reads a `ZONE_CHANGE` without its time, so an old one
+//! doesn't move where the pull starts. No marker is needed. `MAP_CHANGE`
+//! isn't carried: the parser doesn't read it. The fingerprint (below) is
+//! made from the pull's own lines, so it's the same with or without it.
 //!
 //! - Bosses inside a key belong to the key's segment: they aren't cut out
 //!   again, so no line is sent twice.
@@ -91,11 +101,16 @@ pub struct Segment {
     pub end_time: String,
     /// The header line, with its line ending, as the file has it.
     pub header: Option<String>,
+    /// The file's latest `ZONE_CHANGE` line before the segment, with its line
+    /// ending, as the file has it: sent after the header (module notes).
+    /// `None` when there was none, and in queues saved before there was one.
+    #[serde(default)]
+    pub zone_line: Option<String>,
     pub advanced: Option<bool>,
     /// Byte range of the segment's lines in the file: [start, end).
     pub start_offset: u64,
     pub end_offset: u64,
-    /// Header plus range: the uncompressed size sent.
+    /// Header, zone line and range: the uncompressed size sent.
     pub size: u64,
     pub sha256: String,
     /// The fingerprint's roster hash (above); `None` when the segment had no
@@ -105,6 +120,25 @@ pub struct Segment {
 }
 
 impl Segment {
+    /// The lines sent before the segment's range: its header line, then its
+    /// zone line (module notes). `None` when it has neither.
+    pub fn prefix(&self) -> Option<Vec<u8>> {
+        let mut out = Vec::new();
+        out.extend(
+            self.header
+                .as_deref()
+                .map(str::as_bytes)
+                .unwrap_or_default(),
+        );
+        out.extend(
+            self.zone_line
+                .as_deref()
+                .map(str::as_bytes)
+                .unwrap_or_default(),
+        );
+        (!out.is_empty()).then_some(out)
+    }
+
     pub fn start_iso(&self, year_hint: Option<i32>) -> String {
         iso(&self.start_time, year_hint)
     }
@@ -172,6 +206,8 @@ pub struct Splitter {
     header: Option<Header>,
     open: Option<Open>,
     zone: Option<(String, u32)>,
+    /// The latest `ZONE_CHANGE` line, raw, for the next segment's zone line.
+    zone_line: Option<Vec<u8>>,
     /// Pulls and keys seen, including ones inside keys: for counts.
     pub encounters_seen: u32,
     pub keys_seen: u32,
@@ -182,10 +218,18 @@ impl Splitter {
         Self::default()
     }
 
-    /// For a file opened part-way through: the header comes from its first line.
-    pub fn with_header(raw_header_line: &[u8]) -> Self {
+    /// For a file opened part-way through: its header line (its first), and its latest
+    /// `ZONE_CHANGE` before where reading starts (`tailer::last_zone_change`),
+    /// so the next segment carries the same lines as if the file had been
+    /// read from its start.
+    pub fn resuming(raw_header_line: Option<&[u8]>, raw_zone_line: Option<&[u8]>) -> Self {
         let mut s = Self::new();
-        s.set_header(raw_header_line);
+        if let Some(h) = raw_header_line {
+            s.set_header(h);
+        }
+        if let Some(z) = raw_zone_line {
+            s.set_zone(z);
+        }
         s
     }
 
@@ -213,6 +257,20 @@ impl Splitter {
         self.open.as_ref().map(|o| o.seg.start_offset)
     }
 
+    fn set_zone(&mut self, raw: &[u8]) {
+        if let Some(l) = line::parse(raw) {
+            let f = fields(l.rest);
+            if let (Some(name), Some(diff)) = (f.get(1), f.get(2).and_then(|d| d.parse().ok())) {
+                self.zone = Some((name.to_string(), diff));
+            }
+        }
+        // Only a whole line that's UTF-8 is carried: the segment keeps it as
+        // text, and it must go byte for byte as the file has it.
+        if raw.ends_with(b"\n") && std::str::from_utf8(raw).is_ok() {
+            self.zone_line = Some(raw.to_vec());
+        }
+    }
+
     fn set_header(&mut self, raw: &[u8]) {
         if let Some(l) = line::parse(raw) {
             if let Some(h) = header::parse(l.event, l.rest) {
@@ -233,14 +291,7 @@ impl Splitter {
                 None
             }
             "ZONE_CHANGE" => {
-                if let Some(l) = line::parse(raw) {
-                    let f = fields(l.rest);
-                    if let (Some(name), Some(diff)) =
-                        (f.get(1), f.get(2).and_then(|d| d.parse().ok()))
-                    {
-                        self.zone = Some((name.to_string(), diff));
-                    }
-                }
+                self.set_zone(raw);
                 self.append(raw);
                 None
             }
@@ -383,6 +434,11 @@ impl Splitter {
             hasher.update(h);
             size += h.len() as u64;
         }
+        let zone_line = self.zone_line.clone();
+        if let Some(z) = &zone_line {
+            hasher.update(z);
+            size += z.len() as u64;
+        }
         Open {
             kind,
             hasher,
@@ -412,6 +468,7 @@ impl Splitter {
                 start_time: ts.to_string(),
                 end_time: ts.to_string(),
                 header: header.map(|h| String::from_utf8_lossy(&h).into_owned()),
+                zone_line: zone_line.and_then(|z| String::from_utf8(z).ok()),
                 advanced: self.header.as_ref().and_then(|h| h.advanced),
                 start_offset: offset,
                 end_offset: offset,

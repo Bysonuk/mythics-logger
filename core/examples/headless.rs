@@ -215,12 +215,11 @@ async fn main() {
             .poll(
                 &mut |_, len, mtime| live_start(len, mtime, SystemTime::now()),
                 &mut |e| match e {
-                    Event::Opened { path, header, .. } => {
+                    Event::Opened {
+                        path, header, zone, ..
+                    } => {
                         reading = Some(path.to_path_buf());
-                        splitter = match header {
-                            Some(h) => Splitter::with_header(&h),
-                            None => Splitter::new(),
-                        };
+                        splitter = Splitter::resuming(header.as_deref(), zone.as_deref());
                     }
                     Event::Line { offset, bytes } => {
                         if let (Some(s), Some(p)) = (splitter.feed(offset, bytes), &reading) {

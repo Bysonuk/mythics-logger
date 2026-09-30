@@ -74,12 +74,15 @@ pub fn newest_log(dir: &Path) -> io::Result<Option<(PathBuf, SystemTime, u64)>> 
 
 #[derive(Debug)]
 pub enum Event<'a> {
-    /// Started following a file at `offset`. `header` is the file's first line
-    /// when it's a combat log header, for a file opened part-way through.
+    /// Started following a file at `offset`. For a file opened part-way
+    /// through: `header` is its first line when it's a combat log header, and
+    /// `zone` its latest `ZONE_CHANGE` line before `offset`
+    /// (`Splitter::resuming`).
     Opened {
         path: &'a Path,
         offset: u64,
         header: Option<Vec<u8>>,
+        zone: Option<Vec<u8>>,
     },
     /// One whole line, with its line ending, starting at `offset`.
     Line { offset: u64, bytes: &'a [u8] },
@@ -176,11 +179,20 @@ impl Tailer {
             let offset = start_at(&path, len, mtime).min(len);
             let head = read_head(&path).unwrap_or_default();
             let header = if offset > 0 { header_line(&head) } else { None };
+            let zone = if offset > 0 {
+                last_zone_change(&path, offset).unwrap_or_else(|e| {
+                    log::warn!("couldn't look back for the zone: {}", e.kind());
+                    None
+                })
+            } else {
+                None
+            };
             log::info!("following a combat log from byte {offset} of {len}");
             sink(Event::Opened {
                 path: &path,
                 offset,
                 header,
+                zone,
             });
             self.cur = Some(Current {
                 path,
@@ -292,6 +304,58 @@ fn read_head(path: &Path) -> io::Result<Vec<u8>> {
     }
     head.truncate(n);
     Ok(head)
+}
+
+/// The last whole `ZONE_CHANGE` line that ends at or before byte `before` of
+/// a file, with its line ending: what the splitter would be carrying had it
+/// read the file from its start, so a pull resumed after a restart goes with
+/// the same bytes. Reads backwards through one 1 MB buffer, so it costs a
+/// little when the zone changed recently (it usually has) and a single pass
+/// of the file at worst, with flat memory either way.
+pub fn last_zone_change(path: &Path, before: u64) -> io::Result<Option<Vec<u8>>> {
+    const BLOCK: u64 = BUF_SIZE as u64;
+    let mut f = open_shared(path)?;
+    let mut end = before.min(f.metadata()?.len());
+    // The start of a line whose beginning is further back, from the block
+    // read before this one.
+    let mut tail: Vec<u8> = Vec::new();
+    let mut data: Vec<u8> = Vec::with_capacity(BUF_SIZE);
+    while end > 0 {
+        let start = end.saturating_sub(BLOCK);
+        data.clear();
+        data.resize((end - start) as usize, 0);
+        f.seek(SeekFrom::Start(start))?;
+        f.read_exact(&mut data)?;
+        data.extend_from_slice(&tail);
+        // Before the first newline is part of a line that began in an
+        // earlier block, unless this block is the file's start.
+        let whole_from = if start == 0 {
+            0
+        } else {
+            data.iter()
+                .position(|&b| b == b'\n')
+                .map_or(data.len(), |i| i + 1)
+        };
+        let mut line_end = data.len();
+        while line_end > whole_from {
+            let line_start = data[whole_from..line_end - 1]
+                .iter()
+                .rposition(|&b| b == b'\n')
+                .map_or(whole_from, |i| whole_from + i + 1);
+            let l = &data[line_start..line_end];
+            if l.ends_with(b"\n") && crate::line::event_name(l) == Some("ZONE_CHANGE") {
+                return Ok(Some(l.to_vec()));
+            }
+            line_end = line_start;
+        }
+        tail.clear();
+        // A "line" longer than the tailer would ever hand over is garbage.
+        if whole_from <= MAX_PARTIAL {
+            tail.extend_from_slice(&data[..whole_from]);
+        }
+        end = start;
+    }
+    Ok(None)
 }
 
 /// The first line of a file, if it's a combat log header.

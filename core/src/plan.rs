@@ -199,6 +199,7 @@ mod tests {
             start_time: format!("9/28/2026 20:{:02}:00.0001", at % 60),
             end_time: String::new(),
             header: None,
+            zone_line: None,
             advanced: Some(true),
             start_offset: at * 1000,
             end_offset: at * 1000 + 500,

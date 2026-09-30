@@ -145,7 +145,7 @@ fn main() {
                     }
                     let src = Source {
                         path: file.path.clone(),
-                        header: s.header.clone().map(String::into_bytes),
+                        prefix: s.prefix(),
                         start: s.start_offset,
                         end: s.end_offset,
                     };

@@ -155,12 +155,13 @@ impl Follower {
                     .unwrap_or_else(|| live_start(len, mtime, now))
             },
             &mut |e| match e {
-                Event::Opened { path, header, .. } => {
+                Event::Opened {
+                    path, header, zone, ..
+                } => {
                     reading = Some(path.to_path_buf());
-                    *splitter = match header {
-                        Some(h) => Splitter::with_header(&h),
-                        None => Splitter::new(),
-                    };
+                    // Opened part-way: carry on as if read from the start,
+                    // with its header and its zone (`Splitter::resuming`).
+                    *splitter = Splitter::resuming(header.as_deref(), zone.as_deref());
                 }
                 Event::Line { offset, bytes } => {
                     out.activity = true;
@@ -462,6 +463,13 @@ mod tests {
 
     /// Two Mythic Plexus Sentinel pulls, a wipe and a kill (fake players).
     const RAID_NIGHT: &str = include_str!("../../core/tests/fixtures/raid_night.txt");
+    /// Its zone change on entering the raid, before the first pull, as the
+    /// file has it (checked out with either line ending).
+    fn raid_zone() -> Option<&'static str> {
+        let l = RAID_NIGHT.split_inclusive('\n').nth(1).unwrap();
+        assert!(l.contains("  ZONE_CHANGE,2810,"));
+        Some(l)
+    }
     /// A third pull, after the ones above.
     const PULL_THREE: &str = "9/28/2026 20:30:00.0001  ENCOUNTER_START,3129,\"Plexus Sentinel\",16,20,2810\n\
         9/28/2026 20:30:02.0001  SPELL_DAMAGE,Player-1403-0A000001,\"Player1-TarrenMill-EU\",0x512,0x0,Creature-0-1-2810-1-233814-00001C0001,\"Plexus Sentinel\",0x10a48,0x0,1,2,3\n\
@@ -531,6 +539,8 @@ mod tests {
         );
         let (_, seg) = &next.segments[0];
         assert_eq!(seg.start_offset as usize, RAID_NIGHT.len());
+        // Its raid, from the zone change long before the switch.
+        assert_eq!(seg.zone_line.as_deref(), raid_zone());
     }
 
     #[test]
@@ -574,6 +584,9 @@ mod tests {
         let mut again = Follower::new(n.tail.clone());
         let resumed = again.tick(true, n.dir.path(), SystemTime::now()).unwrap();
         assert_eq!(resumed.segments.len(), 1, "only the pull since the restart");
+        // Still named by the raid's zone change, from before the restart.
+        let (_, seg) = &resumed.segments[0];
+        assert_eq!(seg.zone_line.as_deref(), raid_zone());
     }
 
     #[test]

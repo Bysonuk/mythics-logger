@@ -170,8 +170,10 @@ impl FileReport {
 }
 
 /// What the reports hold changed: 2 has the server's boss health for every
-/// pull (`crate::bosshp`), which picks each boss's best wipe.
-const CACHE_VERSION: u32 = 2;
+/// pull (`crate::bosshp`), which picks each boss's best wipe; 3 carries each
+/// segment's zone line (`crate::splitter`), so a past log read by an older
+/// app is read again rather than queued without it.
+const CACHE_VERSION: u32 = 3;
 
 /// Reports kept between runs, keyed by path; valid while size and
 /// modification time match, and the app reads files the same way.

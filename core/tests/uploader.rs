@@ -9,7 +9,7 @@ use mythics_logger_core::plan::{queue_items, BacklogPulls};
 use mythics_logger_core::queue::{Item, Origin, Queue, State};
 use mythics_logger_core::splitter::{split_file, Segment};
 use mythics_logger_core::throttle::Throttle;
-use mythics_logger_core::uploader::{prepare_now, step, Step};
+use mythics_logger_core::uploader::{fingerprint_of, prepare_now, step, Step};
 use rand::RngCore;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -122,14 +122,26 @@ async fn uploads_a_pull_to_the_contract() {
     assert_eq!(body["visibility"], "guild");
     assert_eq!(body["client_version"], env!("CARGO_PKG_VERSION"));
 
-    // The chunk is zstd, and unpacks to the header plus the pull's bytes.
+    // The chunk is zstd, and unpacks to the header, the zone line carried
+    // from before the pull, then the pull's bytes: each line as the file has
+    // it, and all of it what `sha256` is of.
     assert_eq!(reqs[1].content_type.as_deref(), Some("application/zstd"));
     let raw = zstd::decode_all(&reqs[1].body[..]).unwrap();
     let file = std::fs::read(&s.log).unwrap();
     let seg = &first.segment;
     let mut expected = seg.header.clone().unwrap().into_bytes();
+    expected
+        .extend_from_slice(b"9/28/2026 20:01:02.1021  ZONE_CHANGE,2810,\"Manaforge Omega\",16\r\n");
     expected.extend_from_slice(&file[seg.start_offset as usize..seg.end_offset as usize]);
     assert_eq!(raw, expected);
+    let lines: Vec<&[u8]> = file.split_inclusive(|&b| b == b'\n').collect();
+    assert!(lines.contains(&seg.zone_line.as_deref().unwrap().as_bytes()));
+    assert_eq!(
+        mythics_logger_core::splitter::hex(&sha2::Digest::finalize(
+            <sha2::Sha256 as sha2::Digest>::new_with_prefix(&raw)
+        )),
+        first.sha256
+    );
 
     let q = s.queue.lock().unwrap();
     assert_eq!(q.get(&first.sha256).unwrap().state, State::Done);
@@ -834,4 +846,79 @@ async fn busy_summaries_wait_and_are_sent_again() {
     let it = q.get(&items[0].sha256).unwrap();
     assert!(it.summary && it.state == State::Waiting && it.next_try_ms > 0);
     assert_eq!(it.attempts, 1);
+}
+
+/// The same pull, as an app from before zone lines split it (no ZONE_CHANGE
+/// carried) and as this one does: different bytes, so a different SHA-256,
+/// but the same fingerprint, so the site still answers "have" for a copy the
+/// older app sent, and the parser groups the two as one pull.
+#[test]
+fn a_carried_zone_line_leaves_the_fingerprint_alone() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bytes = fixture("raid_night.txt");
+    let name = "WoWCombatLog-092826_200101.txt";
+    let new_log = write_file(tmp.path(), name, &bytes);
+    let old_dir = tmp.path().join("old");
+    std::fs::create_dir_all(&old_dir).unwrap();
+    // What an older app sent: header and range, no zone line.
+    let mut old_segs = segments(&new_log);
+    for seg in &mut old_segs {
+        seg.zone_line = None;
+    }
+    let new_segs = segments(&new_log);
+    assert_eq!(new_segs.len(), 2);
+    for (old, new) in old_segs.iter().zip(&new_segs) {
+        assert!(new.zone_line.is_some());
+        assert_ne!(old.prefix(), new.prefix());
+        let old_item = Item::new(
+            Origin::Live,
+            old_dir.join(name),
+            old.clone(),
+            Visibility::Public,
+            "eu",
+        );
+        let new_item = Item::new(
+            Origin::Live,
+            new_log.clone(),
+            new.clone(),
+            Visibility::Public,
+            "eu",
+        );
+        let print = fingerprint_of(&new_item).expect("a whole pull with a roster");
+        assert_eq!(fingerprint_of(&old_item), Some(print));
+        assert_eq!(old.start_time, new.start_time);
+        assert_eq!(old.end_time, new.end_time);
+    }
+    // And a file with no ZONE_CHANGE at all gives the same fingerprints too.
+    let text = String::from_utf8(bytes.clone()).unwrap();
+    let without: String = text
+        .split_inclusive('\n')
+        .filter(|l| !l.contains("  ZONE_CHANGE,"))
+        .collect();
+    let bare_log = write_file(&old_dir, name, without.as_bytes());
+    let bare_segs = segments(&bare_log);
+    for (bare, new) in bare_segs.iter().zip(&new_segs) {
+        assert_eq!(bare.zone_line, None);
+        assert_ne!(bare.sha256, new.sha256);
+        let a = Item::new(
+            Origin::Backlog,
+            bare_log.clone(),
+            bare.clone(),
+            Visibility::Public,
+            "eu",
+        );
+        let b = Item::new(
+            Origin::Backlog,
+            new_log.clone(),
+            new.clone(),
+            Visibility::Public,
+            "eu",
+        );
+        assert_eq!(fingerprint_of(&a), fingerprint_of(&b));
+    }
+    // A queue saved before zone lines still loads: the segment has none.
+    let mut saved = serde_json::to_value(&new_segs[0]).unwrap();
+    saved.as_object_mut().unwrap().remove("zone_line");
+    let loaded: Segment = serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded.zone_line, None);
 }

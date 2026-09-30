@@ -147,6 +147,7 @@ async fn send_summaries(queue: &Mutex<Queue>, api: &Api, first: &Item) -> Step {
                 i.done_ms = Some(now_ms());
                 i.error = None;
                 i.segment.header = None;
+                i.segment.zone_line = None;
                 if a.status == "have" {
                     i.already = Some(links);
                 } else {
@@ -314,6 +315,7 @@ pub async fn ask_first(queue: &Mutex<Queue>, api: &Api) -> Result<Vec<String>, A
         i.done_ms = Some(now_ms());
         i.error = None;
         i.segment.header = None;
+        i.segment.zone_line = None;
         i.already = Some(Already {
             fight_id: a.fight_id,
             url: a.url,
@@ -337,7 +339,7 @@ pub async fn ask_first(queue: &Mutex<Queue>, api: &Api) -> Result<Vec<String>, A
 pub fn source_of(item: &Item) -> Source {
     Source {
         path: item.file.clone(),
-        header: item.segment.header.clone().map(String::into_bytes),
+        prefix: item.segment.prefix(),
         start: item.segment.start_offset,
         end: item.segment.end_offset,
     }
@@ -609,8 +611,10 @@ fn done(
         i.state = State::Done;
         i.done_ms = Some(now_ms());
         i.error = None;
-        // A finished item needs no header copy; keeps queue.json small.
+        // A finished item needs no header or zone line copy; keeps
+        // queue.json small.
         i.segment.header = None;
+        i.segment.zone_line = None;
     }
     let _ = chunker::clear_dir(dir);
     let _ = q.save();

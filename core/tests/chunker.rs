@@ -31,7 +31,7 @@ fn a_pull_compresses_to_chunks_that_unpack_to_the_segment() {
         .unwrap();
     let src = Source {
         path: log,
-        header: seg.header.clone().map(String::into_bytes),
+        prefix: seg.prefix(),
         start: seg.start_offset,
         end: seg.end_offset,
     };
@@ -61,7 +61,7 @@ fn a_big_segment_splits_into_several_chunks() {
     let log = write_file(tmp.path(), "big.txt", &body);
     let src = Source {
         path: log,
-        header: Some(b"HEADER\r\n".to_vec()),
+        prefix: Some(b"HEADER\r\n".to_vec()),
         start: 0,
         end: body.len() as u64,
     };
@@ -85,7 +85,7 @@ fn text_that_wont_compress_is_cut_smaller_to_fit_4_mb() {
     let log = write_file(tmp.path(), "noise.txt", &body);
     let src = Source {
         path: log,
-        header: None,
+        prefix: None,
         start: 0,
         end: body.len() as u64,
     };
@@ -104,7 +104,7 @@ fn a_file_that_changed_is_refused() {
     let log = write_file(tmp.path(), "WoWCombatLog.txt", b"abc\r\n");
     let src = Source {
         path: log,
-        header: None,
+        prefix: None,
         start: 0,
         end: 5,
     };
@@ -144,7 +144,7 @@ fn a_past_log_compresses_at_level_19_long_and_round_trips() {
     let log = write_file(tmp.path(), "past.txt", &body);
     let src = Source {
         path: log,
-        header: Some(b"HEADER\r\n".to_vec()),
+        prefix: Some(b"HEADER\r\n".to_vec()),
         start: 0,
         end: body.len() as u64,
     };
@@ -185,7 +185,7 @@ fn a_past_logs_chunks_are_compressed_side_by_side_and_come_out_in_order() {
     let log = write_file(tmp.path(), "past.txt", &body);
     let src = Source {
         path: log,
-        header: None,
+        prefix: None,
         start: 0,
         end: body.len() as u64,
     };

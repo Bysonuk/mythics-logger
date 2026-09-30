@@ -1,7 +1,8 @@
 //! Compresses a segment into zstd chunks of at most 4 MB each, on disk.
 //!
-//! The segment is read straight from the log file (its header line, then its
-//! byte range), in fixed-size pieces: memory stays flat whatever its size.
+//! The segment is read straight from the log file (its header and zone
+//! lines, then its byte range), in fixed-size pieces: memory stays flat
+//! whatever its size.
 //! Each piece of `chunk_size` uncompressed bytes becomes one chunk,
 //! compressed on its own, so the server can take them in any order and a
 //! failed upload resumes at the chunk it stopped on.
@@ -116,18 +117,19 @@ impl Profile {
 /// for under 300 MB, beside a game that comes first.
 pub const BACKLOG_THREADS: usize = 2;
 
-/// Where a segment's bytes are: its header line, then a range of a file.
+/// Where a segment's bytes are: the lines carried before it (its header and
+/// zone lines, `Segment::prefix`), then a range of a file.
 #[derive(Debug, Clone)]
 pub struct Source {
     pub path: PathBuf,
-    pub header: Option<Vec<u8>>,
+    pub prefix: Option<Vec<u8>>,
     pub start: u64,
     pub end: u64,
 }
 
 impl Source {
     pub fn len(&self) -> u64 {
-        self.header.as_ref().map_or(0, |h| h.len() as u64) + (self.end - self.start)
+        self.prefix.as_ref().map_or(0, |h| h.len() as u64) + (self.end - self.start)
     }
 
     pub fn is_empty(&self) -> bool {
@@ -138,8 +140,8 @@ impl Source {
     pub fn reader(&self) -> io::Result<impl Read> {
         let mut f = crate::tailer::open_shared(&self.path)?;
         f.seek(SeekFrom::Start(self.start))?;
-        let header = io::Cursor::new(self.header.clone().unwrap_or_default());
-        Ok(header.chain(f.take(self.end - self.start)))
+        let prefix = io::Cursor::new(self.prefix.clone().unwrap_or_default());
+        Ok(prefix.chain(f.take(self.end - self.start)))
     }
 }
 

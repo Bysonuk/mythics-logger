@@ -2,7 +2,7 @@ mod common;
 
 use common::{fixture, write_file};
 use mythics_logger_core::splitter::{Segment, Splitter};
-use mythics_logger_core::tailer::{live_start, Event, Tailer};
+use mythics_logger_core::tailer::{last_zone_change, live_start, Event, Tailer};
 use std::fs::OpenOptions;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -28,6 +28,7 @@ fn poll(t: &mut Tailer) -> Vec<Seen> {
                 path,
                 offset,
                 header,
+                ..
             } => Seen::Opened(name(path), offset, header.is_some()),
             Event::Line { offset, bytes } => Seen::Line(offset, bytes.to_vec()),
             Event::Restarted { path } => Seen::Restarted(name(path)),
@@ -210,4 +211,130 @@ fn live_start_reads_fresh_files_and_leaves_old_ones() {
     let now = SystemTime::now();
     assert_eq!(live_start(5000, now - Duration::from_secs(30), now), 0);
     assert_eq!(live_start(5000, now - Duration::from_secs(3600), now), 5000);
+}
+
+#[test]
+fn resuming_part_way_hands_over_the_latest_zone_change() {
+    let dir = tempfile::tempdir().unwrap();
+    let bytes = fixture("raid_night.txt");
+    write_file(dir.path(), "WoWCombatLog-092826_200101.txt", &bytes);
+    let mut t = Tailer::new(dir.path());
+    let mut zone = None;
+    let second_pull = bytes
+        .windows(21)
+        .position(|w| w == b"20:15:00.0001  ENCOUN")
+        .unwrap()
+        - 10;
+    t.poll(&mut |_, _, _| second_pull as u64, &mut |e| {
+        if let Event::Opened { zone: z, .. } = e {
+            zone = z;
+        }
+    })
+    .unwrap();
+    assert_eq!(
+        zone.as_deref(),
+        Some(&b"9/28/2026 20:01:02.1021  ZONE_CHANGE,2810,\"Manaforge Omega\",16\r\n"[..])
+    );
+    // Read from the start: nothing to look back for.
+    let mut t = Tailer::new(dir.path());
+    t.poll(&mut |_, _, _| 0, &mut |e| {
+        if let Event::Opened { zone: z, .. } = e {
+            assert_eq!(z, None);
+        }
+    })
+    .unwrap();
+}
+
+/// Filler: one line of trash damage (fake players), about 200 bytes.
+fn filler(n: usize) -> String {
+    format!(
+        "9/29/2026 19:{:02}:{:02}.{:04}  SPELL_DAMAGE,Player-1403-0A000001,\"Player1-TarrenMill-EU\",0x512,0x0,Creature-0-1-2810-1-240001-00002A0001,\"Trash\",0xa48,0x0,1,2,3\r\n",
+        (n / 600) % 60,
+        (n / 10) % 60,
+        n % 10_000
+    )
+}
+
+#[test]
+fn last_zone_change_looks_back_across_blocks() {
+    let dir = tempfile::tempdir().unwrap();
+    let header = "9/29/2026 19:00:00.0001  COMBAT_LOG_VERSION,22,ADVANCED_LOG_ENABLED,1,BUILD_VERSION,12.1.0,PROJECT_ID,1\r\n";
+    let city = "9/29/2026 19:00:00.0002  ZONE_CHANGE,2552,\"Khaz Algar (Surface)\",0\r\n";
+    let raid = "9/29/2026 19:30:00.0001  ZONE_CHANGE,2810,\"Manaforge Omega\",16\r\n";
+    let mut text = String::from(header);
+    text.push_str(city);
+    let mut n = 0;
+    // Put the raid's line across the first 1 MB boundary back from the
+    // end, then 3 MB of trash after it.
+    while text.len() < (1 << 20) - 20 {
+        text.push_str(&filler(n));
+        n += 1;
+    }
+    let raid_at = text.len();
+    text.push_str(raid);
+    let after_raid = text.len();
+    while text.len() < raid_at + (3 << 20) {
+        text.push_str(&filler(n));
+        n += 1;
+    }
+    let pull_at = text.len() as u64;
+    text.push_str(
+        "9/29/2026 20:05:00.0001  ENCOUNTER_START,3129,\"Plexus Sentinel\",16,20,2810\r\n",
+    );
+    let p = write_file(
+        dir.path(),
+        "WoWCombatLog-092926_190000.txt",
+        text.as_bytes(),
+    );
+
+    let found = last_zone_change(&p, pull_at).unwrap();
+    assert_eq!(found.as_deref(), Some(raid.as_bytes()));
+    // Every boundary near the raid's line: before it the city, after it the raid.
+    for back in [raid_at - 1, raid_at, raid_at + 1, after_raid - 1] {
+        assert_eq!(
+            last_zone_change(&p, back as u64).unwrap().as_deref(),
+            Some(city.as_bytes()),
+            "reading from {back}"
+        );
+    }
+    assert_eq!(
+        last_zone_change(&p, after_raid as u64).unwrap().as_deref(),
+        Some(raid.as_bytes())
+    );
+    // From anywhere in the file, the same line splitting from the start finds.
+    for cut in [pull_at - 7, pull_at - 1_000_003, pull_at - 2_500_001] {
+        assert_eq!(
+            last_zone_change(&p, cut).unwrap().as_deref(),
+            Some(raid.as_bytes())
+        );
+    }
+    // Before any zone change: none.
+    assert_eq!(last_zone_change(&p, header.len() as u64).unwrap(), None);
+    assert_eq!(last_zone_change(&p, 0).unwrap(), None);
+}
+
+/// Live, after a restart part-way through a raid: the pull that was open
+/// goes with exactly the bytes, and so the SHA-256, of reading the file whole.
+#[test]
+fn a_pull_resumed_after_a_restart_matches_the_whole_file() {
+    let bytes = fixture("raid_night.txt");
+    let dir = tempfile::tempdir().unwrap();
+    let p = write_file(dir.path(), "WoWCombatLog-092826_200101.txt", &bytes);
+    let mut whole = Vec::new();
+    mythics_logger_core::splitter::split_file(&p, |s| whole.push(s), |_| true).unwrap();
+    for seg in &whole {
+        let mut t = Tailer::new(dir.path());
+        let mut splitter = Splitter::new();
+        let mut live = Vec::new();
+        t.poll(&mut |_, _, _| seg.start_offset, &mut |e| match e {
+            Event::Opened { header, zone, .. } => {
+                splitter = Splitter::resuming(header.as_deref(), zone.as_deref());
+            }
+            Event::Line { offset, bytes } => live.extend(splitter.feed(offset, bytes)),
+            _ => {}
+        })
+        .unwrap();
+        live.extend(splitter.finish());
+        assert_eq!(&live[0], seg);
+    }
 }

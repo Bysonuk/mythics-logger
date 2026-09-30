@@ -35,11 +35,11 @@ fn main() {
                         }
                     }
                 }
-                Event::Opened { path, header, .. } => {
+                Event::Opened {
+                    path, header, zone, ..
+                } => {
                     file = Some(path.to_path_buf());
-                    if let Some(h) = header {
-                        splitter = Splitter::with_header(&h);
-                    }
+                    splitter = Splitter::resuming(header.as_deref(), zone.as_deref());
                 }
                 _ => {}
             })
@@ -95,7 +95,7 @@ fn main() {
     for (i, s) in segs.iter().enumerate() {
         let src = Source {
             path: file.clone(),
-            header: s.header.clone().map(String::into_bytes),
+            prefix: s.prefix(),
             start: s.start_offset,
             end: s.end_offset,
         };
