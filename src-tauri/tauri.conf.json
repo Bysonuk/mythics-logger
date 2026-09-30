@@ -1,0 +1,45 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "mythics.gg Logger",
+  "mainBinaryName": "mythics-logger",
+  "version": "0.1.0",
+  "identifier": "gg.mythics.logger",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "mythics.gg Logger",
+        "width": 980,
+        "height": 700,
+        "minWidth": 420,
+        "minHeight": 480,
+        "visible": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["nsis"],
+    "publisher": "mythics.gg",
+    "category": "Utility",
+    "shortDescription": "Uploads your World of Warcraft combat logs to mythics.gg",
+    "longDescription": "Reads World of Warcraft's combat log text file and uploads your boss pulls and Mythic+ keys to mythics.gg, live and from past logs. It never reads the game's memory or automates play, and runs safely alongside the Warcraft Logs uploader.",
+    "copyright": "mythics.gg",
+    "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  }
+}

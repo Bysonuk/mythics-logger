@@ -1,0 +1,16 @@
+[workspace]
+members = ["core", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+# A small binary: players download it, and it runs beside the game.
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true

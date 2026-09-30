@@ -1,0 +1,99 @@
+/* Design tokens: the site's (web/src/styles/tokens.css), trimmed to what the
+   app uses, with the brand's purple (docs/brand/README.md) as the accent.
+   Dark is the default; light follows the system setting. Every font size is
+   one of the --text-* steps, through a role. */
+
+:root {
+  color-scheme: dark;
+
+  --font-display: "Oxanium Variable", "Oxanium", "Segoe UI", system-ui, sans-serif;
+  --font-body: "IBM Plex Sans Variable", "IBM Plex Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", "Consolas", monospace;
+
+  --text-11: calc(11rem / 15);
+  --text-12: calc(12rem / 15);
+  --text-13: calc(13rem / 15);
+  --text-15: 1rem;
+  --text-18: calc(18rem / 15);
+  --text-24: calc(24rem / 15);
+
+  --fs-page-title: var(--text-24);
+  --fs-section-title: var(--text-18);
+  --fs-group-title: var(--text-15);
+  --fs-card-label: var(--text-12);
+  --fs-sub-label: var(--text-11);
+  --fs-body: var(--text-15);
+  --fs-small: var(--text-13);
+  --fs-meta: var(--text-12);
+  --fs-data: var(--text-13);
+
+  --bg: #0b0d11;
+  --bg-2: #0f1218;
+  --panel: #141821;
+  --panel-2: #1a1f2a;
+  --panel-3: #212735;
+  --line: #252b38;
+  --line-2: #323a4b;
+  --ink: #e8ebf1;
+  --dim: #a6aec0;
+  --faint: #7d8699;
+  --hover: rgba(255, 255, 255, 0.045);
+  --press: rgba(0, 0, 0, 0.28);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.03) inset, 0 10px 30px rgba(0, 0, 0, 0.35);
+
+  --good: #34d399;
+  --warn: #fbbf24;
+  --bad: #f87171;
+  --good-ink: #34d399;
+  --warn-ink: #fbbf24;
+  --bad-ink: #f87171;
+
+  /* docs/brand/README.md, "On dark". */
+  --brand-main: #b45cf5;
+  --brand-highlight: #e2c4ff;
+  --brand-shadow: #7b2ec0;
+  --accent: var(--brand-main);
+  /* Text on an accent-filled button. */
+  --on-accent: #0b0d11;
+
+  --t-fast: 120ms;
+  --r: 10px;
+  --r-sm: 6px;
+  --gap: 16px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #eef0f4;
+    --bg-2: #e6e9ef;
+    --panel: #ffffff;
+    --panel-2: #f6f7fa;
+    --panel-3: #eceff4;
+    --line: #dde1e8;
+    --line-2: #c9cfda;
+    --ink: #141821;
+    --dim: #4a5263;
+    --faint: #5a6275;
+    --hover: rgba(0, 0, 0, 0.04);
+    --press: rgba(20, 24, 33, 0.09);
+    --shadow: 0 1px 2px rgba(20, 24, 33, 0.06), 0 8px 24px rgba(20, 24, 33, 0.07);
+    --good-ink: #047857;
+    --warn-ink: #8a6400;
+    --bad-ink: #b42318;
+    /* "On light". */
+    --brand-main: #8a2bd6;
+    --brand-highlight: #c79bf2;
+    --brand-shadow: #5e1a9a;
+    --on-accent: #ffffff;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
