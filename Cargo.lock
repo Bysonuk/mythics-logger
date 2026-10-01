@@ -2308,7 +2308,7 @@ dependencies = [
 
 [[package]]
 name = "mythics-logger"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "keyring",
  "log",
@@ -2329,7 +2329,7 @@ dependencies = [
 
 [[package]]
 name = "mythics-logger-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "base64 0.22.1",
  "chrono",
