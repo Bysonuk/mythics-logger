@@ -1,0 +1,130 @@
+name: Build
+
+# The mythics.gg Logger: Rust core and Tauri shell, and its Preact window.
+# Every push and pull request builds and tests it on GitHub's own Windows
+# runner. A `v*` tag also builds the release installer and attaches it,
+# unsigned, to a draft release for a maintainer to publish. Signing
+# (SignPath) joins the release job once the SignPath Foundation accepts the
+# project: it signs only what this public workflow built.
+
+# Every action is pinned to a full commit SHA (the version in the comment), so a
+# moved tag can't change what builds a signed release.
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  windows:
+    name: Windows (build and test)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      # A release's tag must name the version the app reports, or the
+      # installer and the app's About disagree.
+      - name: Tag matches the app's version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          for v in \
+            "$(node -p "require('./src-tauri/tauri.conf.json').version")" \
+            "$(node -p "require('./package.json').version")" \
+            "$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"; do
+            if [ "$v" != "$want" ]; then
+              echo "::error::Tag $GITHUB_REF_NAME, but a version file says $v"
+              exit 1
+            fi
+          done
+
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable branch, 1 Oct 2026
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - run: npm ci
+
+      - name: "Window: types and tests"
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: "Rust: format, lint, tests"
+        run: |
+          cargo fmt --all --check
+          cargo clippy --workspace --all-targets -- -D warnings
+          cargo test --workspace
+
+      # tauri's CLI reads CI as a boolean; GitHub sets it to "true" already.
+      - name: Unsigned debug installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        run: npm run tauri build -- --debug
+
+      - name: Unsigned release installer
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: npm run tauri build
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        with:
+          name: mythics-logger-unsigned-debug
+          path: target/debug/bundle/nsis/*.exe
+          retention-days: 7
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: startsWith(github.ref, 'refs/tags/v')
+        with:
+          name: mythics-logger-installer
+          path: target/release/bundle/nsis/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    name: Draft release (unsigned)
+    needs: windows
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Only this job may write: it makes the release, nothing else.
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: mythics-logger-installer
+          path: dist
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum -- *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt
+
+      # A draft: a maintainer checks it, then publishes it by hand.
+      - name: Draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/*.exe dist/SHA256SUMS.txt \
+            --repo "$GITHUB_REPOSITORY" \
+            --draft \
+            --title "mythics.gg Logger $GITHUB_REF_NAME" \
+            --notes "Unsigned build from $GITHUB_SHA by this repository's Build workflow (run $GITHUB_RUN_ID). Windows SmartScreen warns before the first run until releases are signed. SHA-256 sums are in SHA256SUMS.txt."

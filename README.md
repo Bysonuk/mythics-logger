@@ -1,6 +1,8 @@
 # mythics.gg Logger (desktop app)
 
-The desktop app that uploads World of Warcraft's combat log to mythics.gg, live and from past logs (#322; scope in `docs/specs/desktop-logger-scope.md`, #321). Built here while it's private; it moves to its own public repository before the first release, so SignPath can sign it.
+The desktop app that uploads World of Warcraft's combat log to [mythics.gg](https://mythics.gg), live and from past logs. Open source under the [MIT licence](LICENSE). Its server is mythics.gg's own, in a separate, private repository; the contract between them is [docs/logger-api.md](docs/logger-api.md), and the planning document is [docs/desktop-logger-scope.md](docs/desktop-logger-scope.md). Issue numbers in the code (#322 and so on), and "mythics.gg issue N" in the history, are that repository's.
+
+Windows only for now. Releases are on this repository's [Releases](../../releases) page, built by its public GitHub Actions (`.github/workflows/build.yml`). They're unsigned until the SignPath Foundation accepts the project (see [Code signing policy](#code-signing-policy)), so Windows SmartScreen warns before the first run.
 
 **What it may do, and never:** it reads only the combat log text files in the game's `Logs` folder. It never reads the game's memory, injects anything, changes game files or settings, or automates play. It's safe beside the Warcraft Logs uploader: both only read the same file (opened read-only, sharing read, write and delete), and this app never changes or deletes it.
 
@@ -12,14 +14,16 @@ The desktop app that uploads World of Warcraft's combat log to mythics.gg, live 
 | `core/tests/` | Tests against small made-up logs in `fixtures/` (players "Player1…", real boss names) and a stub HTTP server. Never a real log or a real server |
 | `core/examples/measure.rs` | Reads a real Logs folder locally and prints counts, sizes and peak memory only |
 | `core/examples/backlog_size.rs` | What a folder of past logs would upload with each Backlog setting, at level 10 and at the backlog's level. Counts, sizes and times only |
-| `core/examples/headless.rs` | The upload path without the window, against a local server (`mt10 logger dev-token`): `--backlog <file>` (add `--all-pulls` for every pull in full) or `--live <folder>`. Prints ids, counts and times only |
+| `core/examples/headless.rs` | The upload path without the window, against a local copy of the server (its token from `mt10 logger dev-token`, [docs/logger-api.md](docs/logger-api.md) section 9; the server's code is private): `--backlog <file>` (add `--all-pulls` for every pull in full) or `--live <folder>`. Prints ids, counts and times only |
 | `src-tauri/` | The Tauri 2 shell: settings, the token in Windows Credential Manager, the tail thread and upload task, tray, start with Windows, single instance, and the window's commands |
 | `src/` | The window: Preact and TypeScript, the site's design tokens and the brand's fonts and purple |
 | `test/` | vitest against happy-dom, with a fake app (`test/fake.ts`) |
+| `docs/` | The API contract and the scope, copied from the mythics.gg repository |
+| `.github/workflows/build.yml` | Builds and tests on GitHub's Windows runner; on a `v*` tag, attaches the installer to a release |
 
 ## Commands
 
-Run from `desktop/`. Needs Rust (stable, MSVC on Windows), Node 22 or later, and WebView2 (part of Windows 11).
+Run from the repository's root. Needs Rust (stable, MSVC on Windows), Node 22 or later, and WebView2 (part of Windows 11).
 
 ```sh
 npm ci                                   # never symlink node_modules from another checkout
@@ -29,6 +33,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 npm run tauri dev                        # the app, against the site in Settings
 npm run tauri build -- --debug           # an unsigned installer in target/debug/bundle/nsis
+npm run tauri build                      # the release installer in target/release/bundle/nsis
 npm run dev                              # the window alone in a browser, with the fake app (?tab=backlog, ?first-run)
 ```
 
@@ -38,7 +43,7 @@ The site address is a setting in development builds (or with `MYTHICS_LOGGER_DEV
 
 ## How it works
 
-- **Segments.** One per boss pull (`ENCOUNTER_START` to `_END`) or Mythic+ key (`CHALLENGE_MODE_START` to `_END`), prefixed with the file's `COMBAT_LOG_VERSION` header line and its latest `ZONE_CHANGE` line before the segment, both byte for byte. The game writes the zone change on entering the instance, long before the first pull, so without it the site can't name the raid ("Unnamed raid", #343). A file opened part-way through (a restart, live logging switched on) looks back for that line (`tailer::last_zone_change`), so a pull goes with the same bytes however it was read. Bosses inside a key stay in the key's segment. A pull or key without its end goes as kind `segment`. The SHA-256 is of the uncompressed segment, and the server de-duplicates on it; the fingerprint ("Ask before uploading") is made from the pull's own lines, so the zone line doesn't change it.
+- **Segments.** One per boss pull (`ENCOUNTER_START` to `_END`) or Mythic+ key (`CHALLENGE_MODE_START` to `_END`), prefixed with the file's `COMBAT_LOG_VERSION` header line and its latest `ZONE_CHANGE` line before the segment, both byte for byte. The game writes the zone change on entering the instance, long before the first pull, so without it the site can't name the raid ("Unnamed raid", mythics.gg issue 343). A file opened part-way through (a restart, live logging switched on) looks back for that line (`tailer::last_zone_change`), so a pull goes with the same bytes however it was read. Bosses inside a key stay in the key's segment. A pull or key without its end goes as kind `segment`. The SHA-256 is of the uncompressed segment, and the server de-duplicates on it; the fingerprint ("Ask before uploading") is made from the pull's own lines, so the zone line doesn't change it.
 - **Live.** The tailer follows the newest `WoWCombatLog*.txt` through a 1 MB buffer, holds back a partial last line, finishes the old file when a new one appears, and starts again if the file is cleared. A file changed in the last 10 minutes is read from its start; an older one is left to the Backlog tab. Its place (the start of any open pull) is saved, so a restart loses nothing. A live pull is compressed as soon as it ends and goes before any past log.
 - **Live logging on or off.** Off until the player chooses: once logged in, the app asks "Upload your pulls live while you play?" (Yes / Not now), and the answer is kept. The switch is in Settings, on the Live tab when it's off, and in the tray menu ("Turn live logging on/off"); it takes effect within a second, without a restart (`workers::Follower`). Off, the tail thread holds no file open and reads nothing, and the header says "Live logging off"; past logs still go, but only from the Backlog tab. Switched on while the app runs, every log already in the folder is followed from its end, so nothing from before the switch is sent (Backlog is for that); a log the game starts afterwards is read from its start. On at start-up, it carries on from its saved place as above. Pulls already queued when it's switched off still finish uploading.
 - **Past logs.** The Backlog tab finds every combat log in the Logs folder and one level below (Warcraft Logs' and Raider.IO's archive folders), or files the player chooses; reads each one, streaming, to list its pulls and keys and what's already uploaded; and queues what the player ticks, with a visibility. Reports are cached by path, size and modification time. Uploads can be paused, and resume after a restart.
@@ -68,10 +73,39 @@ Level 19 with long-distance matching does about 1.0 to 1.5 MB of log a second a 
 
 ## Still to do
 
-- The server's side (`docs/specs/logger-api.md`, #326): checked end to end locally with `examples/headless.rs` on a real log (backlog, live tail, repeat, delete). Not yet against mythics.gg itself.
+- The server's side ([docs/logger-api.md](docs/logger-api.md), mythics.gg issue 326): checked end to end locally with `examples/headless.rs` on a real log (backlog, live tail, repeat, delete). Not yet against mythics.gg itself.
 - "Only upload my guild's raids and keys": stored, not applied; needs the server.
-- Signing (SignPath), the Microsoft Store, auto-update, and the move to a public repo.
+- Signing (SignPath, once the Foundation accepts the project), the Microsoft Store, and auto-update.
 - macOS paths and build (`wowdir.rs` has the TODO).
 - The Battle.net agent's install list as another place to look for the game.
 - Trash between pulls, and a pull's phase: the server's parse.
 - Zipped archives in the Backlog tab.
+
+## Releases
+
+Every release is built by this repository's own workflow, `.github/workflows/build.yml`, on a GitHub-hosted Windows runner, from the tagged commit and nothing else: typecheck and tests for the window, rustfmt, clippy and tests for the Rust workspace, then the NSIS installer (`npm run tauri build`). Pushing a tag `v<version>` (the version in `src-tauri/tauri.conf.json`, `package.json` and `Cargo.toml`) attaches the installer and its SHA-256 to a draft release, which a maintainer reviews and publishes. Nobody uploads an installer built anywhere else.
+
+## Code signing policy
+
+Windows releases are to be signed through the [SignPath Foundation](https://signpath.org)'s free programme for open-source projects. Until it accepts the project, releases are unsigned. Once it does:
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
+
+- **Committers and reviewers:** [@Bysonuk](https://github.com/Bysonuk), the project's only maintainer. Changes from anyone else come as pull requests and are reviewed by a maintainer before they're merged.
+- **Approvers:** [@Bysonuk](https://github.com/Bysonuk), the project's owner, approves every signing request.
+- **Builds:** only from this repository's public GitHub Actions workflow (`.github/workflows/build.yml`), from a tagged commit on the default branch. No installer built on anyone's own computer is signed.
+- **What's signed:** the app's own installer and executable only (`mythics-logger.exe` and its NSIS installer). Third-party components are included as their authors publish them, under their own licences, and aren't re-signed.
+
+### Privacy
+
+This program connects to no networked system other than the mythics.gg site (`https://mythics.gg`, or another site address set on purpose in its development settings, for testing against a local server), and sends nothing until the player has logged in with Battle.net through that site in their own browser. What it sends, and only as the player chooses:
+
+- **Combat log segments:** the boss pulls and Mythic+ keys from World of Warcraft's combat log text files (`WoWCombatLog*.txt` in the game's `Logs` folder), compressed, each with the visibility the player picks (Public, Guild only or Private). Live logging is off until the player turns it on; past logs go only when the player chooses them in the Backlog tab. A combat log records everyone near the player: other players' names, realms, gear and what they cast.
+- **With each upload:** the log file's name (never its folder, which can hold the Windows user name) and a hash of that name and the file's first time (so the site shows one file as one log), the segment's start and end times, the boss or dungeon, its difficulty or key level, its size and SHA-256, a hash of the pull's player list (to ask first whether a raid member uploaded it already), the region, the visibility, and the app's version.
+- **Summaries:** for past logs, by default, wipes other than each boss's best go as a summary only: the boss, when, how long, the boss's health at the end, and the player-list hash.
+
+Besides the `Logs` folder, it reads only where World of Warcraft is installed, to find that folder (the game's install path in the Windows registry, and the usual install folders). It never reads the game's memory or its other files, and never changes game settings. It keeps its sign-in in Windows Credential Manager, its settings and upload queue in its own folders, and a log file of its own that holds counts, offsets and error kinds, never a line from a combat log, a name or an address. It never sends anything to anyone but mythics.gg. The site's privacy policy is at <https://mythics.gg/privacy/>.
+
+## Licence
+
+[MIT](LICENSE). The mythics.gg name and logo (the icons in `src-tauri/icons/` and the mark in `src/components.tsx`) identify the official app; a fork should use its own.
