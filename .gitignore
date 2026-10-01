@@ -1,0 +1,8 @@
+# Rust and Vite build output
+/target/
+/dist/
+/node_modules/
+/src-tauri/gen/
+
+# Local environment
+.env

@@ -1,0 +1,7 @@
+# One line ending for every text file on every checkout, as in mythics.gg's
+# own repository. The combat log fixtures are read with either ending
+# (core/tests/common/mod.rs turns them into CRLF, as the game writes).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
