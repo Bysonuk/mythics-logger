@@ -40,8 +40,9 @@ pub const LEVEL: i32 = 10;
 pub const BACKLOG_LEVEL: i32 = 19;
 /// Long-distance matching with a window of up to 2^27 bytes (128 MiB). zstd
 /// shrinks the window to the chunk when the chunk is smaller, as it always
-/// is here; the server decompresses windows up to 2^27 and refuses bigger
-/// ones (`docs/specs/logger-api.md`, "Send a chunk").
+/// is here; the server refuses a frame that doesn't state its size or asks
+/// for more window than its size needs (`docs/logger-api.md`, "Send a
+/// chunk").
 pub const BACKLOG_WINDOW_LOG: u32 = 27;
 /// Past logs' chunks are bigger, so long-distance matching has more to
 /// match against: a combat log repeats itself over minutes, not kilobytes.
