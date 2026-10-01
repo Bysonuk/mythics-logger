@@ -159,6 +159,9 @@ export interface BacklogFile {
   live: boolean;
   /** Why it can't be archived now; null if it can. */
   archive_block: ArchiveBlock | null;
+  /** The player chose to skip the rest of this log: what isn't uploaded
+   *  won't be, and "Archive logs once uploaded" may archive it. */
+  skipped: boolean;
 }
 
 /** Why a log can't be archived (src-tauri's `archive_block`, and the codes

@@ -248,19 +248,12 @@ impl Queue {
             .any(|i| i.file == file && matches!(i.state, State::Waiting | State::Uploading))
     }
 
-    /// Every log file with pulls in the queue, all of them uploaded (none
-    /// waiting, uploading or refused): the logs "Archive logs once uploaded"
-    /// may archive. A refused pull keeps its log, so it can be tried again.
-    pub fn finished_files(&self) -> Vec<PathBuf> {
+    /// Every log file with pulls in the queue, in any state: the logs
+    /// "Archive logs once uploaded" looks at (`crate::archive::ready_to_archive`).
+    pub fn files(&self) -> Vec<PathBuf> {
         let mut files: Vec<PathBuf> = self.items.iter().map(|i| i.file.clone()).collect();
         files.sort();
         files.dedup();
-        files.retain(|f| {
-            self.items
-                .iter()
-                .filter(|i| &i.file == f)
-                .all(|i| i.state == State::Done)
-        });
         files
     }
 
@@ -349,6 +342,18 @@ impl Queue {
             }
             !(i.state == State::Done && i.done_ms.is_some_and(|d| d < cutoff))
         });
+    }
+
+    /// Forgets a log's waiting past-log pulls: the player skipped the rest of
+    /// it. One already uploading finishes. Returns how many went.
+    pub fn remove_waiting_of(&mut self, file: &Path) -> u32 {
+        let shas: Vec<String> = self
+            .items
+            .iter()
+            .filter(|i| i.file == file && i.state == State::Waiting && i.origin == Origin::Backlog)
+            .map(|i| i.sha256.clone())
+            .collect();
+        shas.iter().filter(|s| self.remove_waiting(s)).count() as u32
     }
 
     /// Forgets waiting past-log items the player took out of the list.

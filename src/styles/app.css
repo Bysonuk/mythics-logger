@@ -720,6 +720,19 @@ progress {
   justify-items: end;
 }
 
+.file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.button-quiet[aria-pressed="true"] {
+  background: var(--panel-3);
+  border-color: var(--accent);
+}
+
 .file-archive {
   display: flex;
   flex-wrap: wrap;
@@ -854,7 +867,8 @@ progress {
   .file-state {
     text-align: left;
   }
-  .file-archive {
+  .file-archive,
+  .file-actions {
     justify-content: flex-start;
   }
 }

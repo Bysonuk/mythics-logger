@@ -2,7 +2,7 @@
 
 use crate::settings::Settings;
 use mythics_logger_core::api::{Api, FightRow, Main, UploadRow, Visibility};
-use mythics_logger_core::archive::{self, FolderSize, NotEligible};
+use mythics_logger_core::archive::{self, FolderSize, NotEligible, Skips};
 use mythics_logger_core::backlog::FileReport;
 use mythics_logger_core::plan::{self, BacklogPulls};
 use mythics_logger_core::queue::{now_ms, Counts, Item, Origin, Queue, State};
@@ -38,6 +38,8 @@ pub struct AppState {
     /// Set when a token was refused mid-upload.
     pub signed_out_notice: AtomicBool,
     pub archive: Mutex<ArchiveState>,
+    /// Logs whose remaining pulls the player chose to skip (Backlog).
+    pub skips: Mutex<Skips>,
 }
 
 /// Archiving finished logs (`mythics_logger_core::archive`).
@@ -108,6 +110,10 @@ pub fn archive_view(a: &mut ArchiveState, logs_dir: Option<&Path>) -> ArchiveVie
 impl AppState {
     pub fn settings_path(&self) -> PathBuf {
         self.config_dir.join("settings.json")
+    }
+
+    pub fn skips_path(&self) -> PathBuf {
+        self.data_dir.join("skipped-logs.json")
     }
 
     pub fn api(&self) -> Api {
@@ -403,6 +409,9 @@ pub struct BacklogFileView {
     /// in the Logs folder); `None` if it may be. Whether another program has
     /// it open is checked only when it's archived.
     pub archive_block: Option<NotEligible>,
+    /// The player chose to skip the rest of this log: its pulls not yet
+    /// uploaded won't be, and "Archive logs once uploaded" may archive it.
+    pub skipped: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -426,6 +435,12 @@ pub struct BacklogView {
 pub struct ArchiveCheck<'a> {
     pub newest: Option<&'a Path>,
     pub now: SystemTime,
+    /// Logs whose rest the player skipped.
+    pub skips: Option<&'a Skips>,
+}
+
+fn skipped(check: &ArchiveCheck<'_>, path: &Path, size: u64) -> bool {
+    check.skips.is_some_and(|s| s.is_skipped(path, size))
 }
 
 fn archive_block(
@@ -514,6 +529,7 @@ pub fn backlog_view(
                 q,
                 check,
             ),
+            skipped: skipped(check, &r.file.path, r.file.size),
         });
     }
     for f in &b.pending {
@@ -544,6 +560,7 @@ pub fn backlog_view(
                 q,
                 check,
             ),
+            skipped: skipped(check, &f.path, f.size),
         });
     }
     files.sort_by_key(|f| std::cmp::Reverse(f.modified_ms));
@@ -610,6 +627,7 @@ pub fn snapshot(s: &AppState) -> Snapshot {
             .map(|(p, _, _)| p),
         _ => None,
     };
+    let skips = s.skips.lock().expect("skips");
     let backlog = backlog_view(
         &b,
         &q,
@@ -619,8 +637,10 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         &ArchiveCheck {
             newest: newest.as_deref(),
             now: SystemTime::now(),
+            skips: Some(&skips),
         },
     );
+    drop(skips);
     drop(b);
     let archive = archive_view(
         &mut s.archive.lock().expect("archive"),
@@ -798,6 +818,7 @@ mod tests {
         ArchiveCheck {
             newest: None,
             now: SystemTime::now(),
+            skips: None,
         }
     }
 
@@ -960,6 +981,7 @@ mod tests {
         let later = ArchiveCheck {
             newest: None,
             now: SystemTime::now() + Duration::from_secs(3600),
+            skips: None,
         };
         let block = |q: &Queue, live: Option<&Path>, c: &ArchiveCheck<'_>| {
             backlog_view(&b, q, &HashSet::new(), log.parent(), live, c).files[0].archive_block
@@ -971,6 +993,7 @@ mod tests {
         let newest = ArchiveCheck {
             newest: Some(&log),
             now: later.now,
+            skips: None,
         };
         assert_eq!(block(&q, None, &newest), Some(NotEligible::Newest));
 
@@ -983,17 +1006,31 @@ mod tests {
             "eu",
         ));
         assert_eq!(block(&q, None, &later), Some(NotEligible::Queued));
-        assert!(q.finished_files().is_empty());
         q.get_mut(&segs[0].sha256).unwrap().state = State::Uploading;
         assert_eq!(block(&q, None, &later), Some(NotEligible::Queued));
         q.get_mut(&segs[0].sha256).unwrap().state = State::Failed;
         assert_eq!(block(&q, None, &later), None, "the player may archive it");
-        assert!(
-            q.finished_files().is_empty(),
-            "but it isn't archived by itself: a refused pull may be tried again"
-        );
-        q.get_mut(&segs[0].sha256).unwrap().state = State::Done;
-        assert_eq!(q.finished_files(), std::slice::from_ref(&log));
+        assert_eq!(q.files(), std::slice::from_ref(&log));
+
+        // Skipping the rest of it shows, while the file is the same size.
+        let mut skips = Skips::default();
+        let size = std::fs::metadata(&log).unwrap().len();
+        skips.set(&log, size, true);
+        let with = ArchiveCheck {
+            newest: None,
+            now: later.now,
+            skips: Some(&skips),
+        };
+        let v = backlog_view(&b, &q, &HashSet::new(), log.parent(), None, &with);
+        assert!(v.files[0].skipped);
+        skips.set(&log, size + 1, true);
+        let with = ArchiveCheck {
+            newest: None,
+            now: later.now,
+            skips: Some(&skips),
+        };
+        let v = backlog_view(&b, &q, &HashSet::new(), log.parent(), None, &with);
+        assert!(!v.files[0].skipped, "the log changed since");
 
         // Not directly in the Logs folder (another tool's archive folder).
         let v = backlog_view(

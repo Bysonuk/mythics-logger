@@ -441,6 +441,35 @@ describe("the Backlog tab", () => {
     expect(host.querySelector(".notice-good")!.textContent).toContain("had already been moved");
   });
 
+  it("lets the player skip the rest of a log, and undo it", async () => {
+    const bridge = await mount(snapshot(), "backlog");
+    const rows = [...host.querySelectorAll<HTMLLIElement>(".file")];
+    const skipButton = (row: HTMLLIElement) => [...row.querySelectorAll("button")].find((b) => b.textContent === "Skip the rest") ?? null;
+    // Not on the log being written; on each past log with pulls left.
+    expect(skipButton(rows[0]!)).toBeNull();
+    const skip = skipButton(rows[1]!)!;
+    expect(skip.getAttribute("aria-pressed")).toBe("false");
+    expect(skip.getAttribute("aria-label")).toBe("Skip the rest of WoWCombatLog-092126_193000.txt");
+    await click(skip);
+    expect(bridge.calls).toContainEqual(["backlogSkip", "C:\\Logs\\WoWCombatLog-092126_193000.txt", true]);
+    expect(text()).toContain("Skip the rest of a log you don't want to upload in full");
+  });
+
+  it("shows a skipped log as such, leaves it out of Upload all, and can undo", async () => {
+    const s = snapshot();
+    s.backlog.files[1] = { ...s.backlog.files[1]!, skipped: true };
+    const bridge = await mount(s, "backlog");
+    const row = [...host.querySelectorAll<HTMLLIElement>(".file")][1]!;
+    expect(row.textContent).toContain("Rest skipped: 3 pulls won't be uploaded");
+    expect(row.querySelector<HTMLInputElement>('input[type="checkbox"]')!.disabled).toBe(true);
+    await click(button("Upload all"));
+    expect(bridge.calls).toContainEqual(["backlogUpload", ["C:\\Logs\\RaiderIOLogsArchive\\WoWCombatLog-112120_120130.txt"], "guild"]);
+    const undo = [...row.querySelectorAll("button")].find((b) => b.textContent === "Skip the rest")!;
+    expect(undo.getAttribute("aria-pressed")).toBe("true");
+    await click(undo);
+    expect(bridge.calls).toContainEqual(["backlogSkip", "C:\\Logs\\WoWCombatLog-092126_193000.txt", false]);
+  });
+
   it("looks for logs the first time it opens", async () => {
     const s = snapshot();
     s.backlog = { ...s.backlog, files: [], total: 0, done: 0 };
