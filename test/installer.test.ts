@@ -12,6 +12,7 @@ import settingsView from "../src/views/Settings.tsx?raw";
 import livePrompt from "../src/views/LivePrompt.tsx?raw";
 import addonPrompt from "../src/views/AddonPrompt.tsx?raw";
 import addonSettings from "../src/views/AddonSettings.tsx?raw";
+import appUpdate from "../src/views/AppUpdate.tsx?raw";
 import shell from "../src-tauri/src/lib.rs?raw";
 
 const flat = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -54,6 +55,17 @@ describe("installer privacy page", () => {
     expect(page).toContain('Settings > In-game addon > "Keep the addon up to date"');
     expect(addonSettings).toContain('<Card title="In-game addon">');
     expect(addonSettings).toContain("Keep the addon up to date");
+  });
+
+  it("says the app asks GitHub for its own updates, with no player data, and installs only when asked", () => {
+    for (const text of [page, readme]) {
+      expect(flat(text)).toContain("besides asking GitHub for its own updates");
+    }
+    expect(flat(page)).toContain("That request carries no player data");
+    expect(flat(page)).toContain("installed only when you select Update now");
+    expect(flat(readme)).toContain("No player data goes with them");
+    expect(appUpdate).toContain("Update now");
+    expect(appUpdate).toContain("Later");
   });
 
   it("says the addon is installed only if the player says yes, what it touches, and what's left after uninstalling", () => {

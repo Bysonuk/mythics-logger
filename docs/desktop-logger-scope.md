@@ -112,7 +112,7 @@ The app reads only enough to find boundaries; the site does the real reading. Ea
 | --- | --- |
 | Tray | Closes to the tray; a small window shows the current session and the last pull, with a link to it on the site |
 | Start with the computer | Off by default; a setting turns it on |
-| Updates | Later: signed updates, never mid-raid |
+| Updates | Decided 1 Oct 2026: Tauri's updater, from this repository's published GitHub releases, each signed for its version; asked at start and every few hours, installed only when the player selects Update now ("Version X is ready", with what changed) |
 | Windows signing | The SignPath Foundation (decided); see the README's code signing policy |
 | Microsoft Store | A second channel (decided) |
 | macOS | Later |

@@ -201,6 +201,18 @@ export interface AddonView {
   checked_ms: number | null;
 }
 
+/** A newer version of this app (src-tauri's `app_update.rs`). */
+export interface AppUpdateView {
+  available: { version: string; notes: string | null; date: string | null } | null;
+  /** Show "Version X is ready": there is one, and the player hasn't said Later. */
+  offer: boolean;
+  status: "idle" | "checking" | "downloading" | "installing";
+  progress_pct: number | null;
+  /** "update_check" or "update_install" (`errorText`). */
+  error: string | null;
+  checked_ms: number | null;
+}
+
 export interface BacklogView {
   scanning: boolean;
   files_done: number;
@@ -238,6 +250,7 @@ export interface Snapshot {
   counts: Counts;
   archive: ArchiveView;
   addon: AddonView;
+  app_update: AppUpdateView;
 }
 
 export interface HistoryRow extends LogPlace {

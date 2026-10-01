@@ -7,7 +7,7 @@ PRIVACY
 
 You choose what to upload. Nothing is sent until you log in.
 
-The app sends nothing until you log in with Battle.net through mythics.gg in your own browser. It connects to no networked system other than mythics.gg (https://mythics.gg).
+The app sends nothing until you log in with Battle.net through mythics.gg in your own browser. It connects to no networked system other than mythics.gg (https://mythics.gg), and GitHub for its own updates. It also asks GitHub (github.com, where this app's releases are published) whether there's a new version of the app: when it starts and every few hours, whether or not you're logged in. That request carries no player data, only the app's own version; a new version is installed only when you select Update now, and only if its signature checks out.
 
 After you log in, it sends only what you choose:
 
@@ -26,7 +26,7 @@ What it sends, and only as you choose:
 
 What it reads: only the combat log text files in the game's Logs folder, and where World of Warcraft is installed, to find that folder (the game's install path in the Windows registry, and the usual install folders). It never reads the game's memory or its other files, never changes game files or settings, and never controls the game, except the mythics.gg addon's own folders if you say yes, as above: then it reads the addon's version there, and the names of running programs, only to wait until the game is closed. It changes no combat log unless you archive logs, as above.
 
-What it keeps on this computer: your sign-in in Windows Credential Manager, its settings and upload queue in its own folders, and a log file of its own that holds counts, offsets and error kinds, never a line from a combat log, a name or an address. It never sends anything to anyone but mythics.gg.
+What it keeps on this computer: your sign-in in Windows Credential Manager, its settings and upload queue in its own folders, and a log file of its own that holds counts, offsets and error kinds, never a line from a combat log, a name or an address. It never sends anything to anyone but mythics.gg, besides asking GitHub for its own updates.
 
 To uninstall: Windows Settings > Apps > Installed apps > mythics.gg Logger > Uninstall. The README's Uninstall section says what is left behind and how to remove it. Logs you archived stay in the game's Logs\MythicsLogsArchive folder: unzip any you want to keep, then delete the folder to remove them. The mythics.gg addon, if the app installed it, stays in Interface\AddOns: delete its Mythics and Mythics_ folders to remove it.
 

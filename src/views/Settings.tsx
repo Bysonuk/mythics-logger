@@ -4,6 +4,7 @@ import { Account, Card, Notice, VisibilityRadios } from "../components";
 import { formatBytes, formatCount } from "../format";
 import type { SettingsPatch, Snapshot } from "../types";
 import { AddonSettings } from "./AddonSettings";
+import { AppVersion } from "./AppUpdate";
 import { LIVE_WHY } from "./LivePrompt";
 
 /** "Delete archived logs after": never (0), or after so many days. */
@@ -260,6 +261,11 @@ export function About({ snap, bridge }: { snap: Snapshot; bridge: Bridge }) {
         you: other players' names, realms, gear and what they cast. We use it to build rankings and guild pages. Private logs are never
         shown on the site.
       </p>
+      <h3 class="group-title">Its own updates</h3>
+      <p>
+        It asks GitHub, where its releases are published, whether there's a new version of the app: when it starts and every few hours,
+        sending no player data. A new version is installed only when you select Update now, and only if its signature checks out.
+      </p>
       <h3 class="group-title">What it keeps on this computer</h3>
       <p>
         Your sign-in, in Windows Credential Manager. Uploads waiting to be sent. The app's own log file records counts and problems only,
@@ -284,8 +290,8 @@ export function About({ snap, bridge }: { snap: Snapshot; bridge: Bridge }) {
         <button type="button" class="button button-quiet" onClick={() => void bridge.openSite("/privacy/")}>
           Privacy policy
         </button>
-        <span class="meta">Version {snap.version}</span>
       </p>
+      <AppVersion snap={snap} bridge={bridge} />
     </Card>
   );
 }

@@ -43,5 +43,15 @@
         "installMode": "currentUser"
       }
     }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEM4Mjk4QTk0RTRCQzgyNTkKUldSWmdyemtsSW9weU80SDZmZ1I3RSs5ekIxMHVBeXZtcHJwYURyUzJGN2xLUFNERmlhQmxzLzYK",
+      "endpoints": ["https://github.com/Bysonuk/mythics-logger/releases/latest/download/latest.json"],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

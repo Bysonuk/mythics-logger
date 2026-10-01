@@ -25,6 +25,10 @@ tauri-plugin-dialog = "2"
 tauri-plugin-log = "2"
 tauri-plugin-opener = "2"
 tauri-plugin-single-instance = "2"
+# The app's own updates (app_update.rs), checked against the public key in
+# tauri.conf.json. Exact version; rustls only, no zip (the NSIS installer is
+# downloaded as it is) and no system proxy.
+tauri-plugin-updater = { version = "=2.13.1", default-features = false, features = ["rustls-tls"] }
 tokio = { version = "1", features = ["time", "sync"] }
 
 [dev-dependencies]

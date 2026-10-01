@@ -43,6 +43,9 @@ pub struct AppState {
     /// The in-game addon (`addon.rs`), and the nudge for its job.
     pub addon: Mutex<crate::addon::AddonState>,
     pub addon_wake: tokio::sync::Notify,
+    /// The app's own updates (`app_update.rs`).
+    pub app_update: Mutex<crate::app_update::AppUpdateState>,
+    pub app_update_wake: tokio::sync::Notify,
 }
 
 /// Archiving finished logs (`mythics_logger_core::archive`).
@@ -606,6 +609,7 @@ pub struct Snapshot {
     pub counts: Counts,
     pub archive: ArchiveView,
     pub addon: crate::addon::AddonView,
+    pub app_update: crate::app_update::AppUpdateView,
 }
 
 pub fn snapshot(s: &AppState) -> Snapshot {
@@ -669,6 +673,7 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         backlog,
         archive,
         addon: crate::addon::view(&s.addon.lock().expect("addon")),
+        app_update: crate::app_update::view(&s.app_update.lock().expect("app update")),
         live,
         settings,
     }
