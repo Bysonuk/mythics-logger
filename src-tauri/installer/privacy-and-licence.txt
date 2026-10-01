@@ -1,0 +1,42 @@
+mythics.gg Logger: privacy and licence
+
+Please read this before installing. It is the same as the Privacy section of the app's README (https://github.com/Bysonuk/mythics-logger#privacy). The site's privacy policy is at https://mythics.gg/privacy/.
+
+
+PRIVACY
+
+You choose what to upload. Nothing is sent until you log in.
+
+The app sends nothing until you log in with Battle.net through mythics.gg in your own browser. It connects to no networked system other than mythics.gg (https://mythics.gg).
+
+After you log in, it sends only what you choose:
+
+- Live logging is off until you turn it on. Once you've logged in, the app asks "Upload your pulls live while you play?" (Yes / Not now). You can turn it off at any time: Settings > Live logging, or "Turn live logging off" in the tray icon's menu. Off, the app doesn't read your combat log as you play.
+- Past logs go only when you choose them in the Backlog tab.
+- You choose who sees each upload (Public, Guild only or Private) in Settings > Visibility for new uploads, or on each upload in History, where you can also delete it.
+- Log out (Settings > Account) and the app sends nothing more.
+
+What it sends, and only as you choose:
+
+- Combat log segments: the boss pulls and Mythic+ keys from World of Warcraft's combat log text files (WoWCombatLog*.txt in the game's Logs folder), compressed, each with the visibility you pick. A combat log records everyone near you: other players' names, realms, gear and what they cast.
+- With each upload: the log file's name (never its folder, which can hold your Windows user name) and a hash of that name and the file's first time, the segment's start and end times, the boss or dungeon, its difficulty or key level, its size and SHA-256, a hash of the pull's player list (to ask first whether a raid member uploaded it already), the region, the visibility, and the app's version.
+- Summaries: for past logs, by default, wipes other than each boss's best go as a summary only: the boss, when, how long, the boss's health at the end, and the player-list hash.
+
+What it reads: only the combat log text files in the game's Logs folder, and where World of Warcraft is installed, to find that folder (the game's install path in the Windows registry, and the usual install folders). It never reads the game's memory or its other files, never changes game files or settings, and never controls the game.
+
+What it keeps on this computer: your sign-in in Windows Credential Manager, its settings and upload queue in its own folders, and a log file of its own that holds counts, offsets and error kinds, never a line from a combat log, a name or an address. It never sends anything to anyone but mythics.gg.
+
+To uninstall: Windows Settings > Apps > Installed apps > mythics.gg Logger > Uninstall. The README's Uninstall section says what is left behind and how to remove it.
+
+
+LICENCE
+
+MIT License
+
+Copyright (c) 2026 mythics.gg
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

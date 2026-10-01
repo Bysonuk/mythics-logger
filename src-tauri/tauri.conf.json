@@ -34,7 +34,9 @@
     "category": "Utility",
     "shortDescription": "Uploads your World of Warcraft combat logs to mythics.gg",
     "longDescription": "Reads World of Warcraft's combat log text file and uploads your boss pulls and Mythic+ keys to mythics.gg, live and from past logs. It never reads the game's memory or automates play, and runs safely alongside the Warcraft Logs uploader.",
-    "copyright": "mythics.gg",
+    "copyright": "Copyright (c) 2026 mythics.gg",
+    "license": "MIT",
+    "licenseFile": "installer/privacy-and-licence.txt",
     "icon": ["icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png", "icons/icon.icns", "icons/icon.ico"],
     "windows": {
       "nsis": {

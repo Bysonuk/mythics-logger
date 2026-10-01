@@ -83,20 +83,30 @@ Level 19 with long-distance matching does about 1.0 to 1.5 MB of log a second a 
 
 ## Releases
 
-Every release is built by this repository's own workflow, `.github/workflows/build.yml`, on a GitHub-hosted Windows runner, from the tagged commit and nothing else: typecheck and tests for the window, rustfmt, clippy and tests for the Rust workspace, then the NSIS installer (`npm run tauri build`). Pushing a tag `v<version>` (the version in `src-tauri/tauri.conf.json`, `package.json` and `Cargo.toml`) attaches the installer and its SHA-256 to a draft release, which a maintainer reviews and publishes. Nobody uploads an installer built anywhere else.
+Every release is built by this repository's own workflow, `.github/workflows/build.yml`, on a GitHub-hosted Windows runner, from the tagged commit and nothing else: typecheck and tests for the window, rustfmt, clippy and tests for the Rust workspace, then the NSIS installer (`npm run tauri build`). Pushing a tag `v<version>` (the version in `src-tauri/tauri.conf.json`, `package.json` and `Cargo.toml`) attaches the installer and its SHA-256 to a draft release, which a maintainer reviews and publishes. Nobody uploads an installer built anywhere else. Every release's notes end with a "Code signing policy" section linking the one below; while `SIGNED` is `"false"` in the workflow's "Draft release" step it says the build is unsigned, and set to `"true"` (once SignPath signs the installer) it carries SignPath's credit line instead.
 
 ## Code signing policy
 
-Windows releases are to be signed through the [SignPath Foundation](https://signpath.org)'s free programme for open-source projects. Until it accepts the project, releases are unsigned. Once it does:
-
 Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org).
 
-- **Committers and reviewers:** [@Bysonuk](https://github.com/Bysonuk), the project's only maintainer. Changes from anyone else come as pull requests and are reviewed by a maintainer before they're merged.
-- **Approvers:** [@Bysonuk](https://github.com/Bysonuk), the project's owner, approves every signing request.
+**Status:** the project has applied to the SignPath Foundation's free programme for open-source projects. Until the application is accepted, releases are unsigned, and each release's notes say so.
+
+- **Committers and reviewers:** [@Bysonuk](https://github.com/Bysonuk). Changes from anyone else come as pull requests and are reviewed before they're merged.
+- **Approvers:** [@Bysonuk](https://github.com/Bysonuk), who approves every signing request.
+- **Privacy:** see [Privacy](#privacy) below, and the site's privacy policy at <https://mythics.gg/privacy/>. The installer shows the same privacy statement, with the MIT licence, before it installs anything.
 - **Builds:** only from this repository's public GitHub Actions workflow (`.github/workflows/build.yml`), from a tagged commit on the default branch. No installer built on anyone's own computer is signed.
 - **What's signed:** the app's own installer and executable only (`mythics-logger.exe` and its NSIS installer). Third-party components are included as their authors publish them, under their own licences, and aren't re-signed.
 
 ### Privacy
+
+You choose what to upload. Nothing is sent until you log in.
+
+- Live logging is off until you turn it on: once you've logged in, the app asks "Upload your pulls live while you play?" (Yes / Not now). Turn it off at any time in Settings > Live logging, or with "Turn live logging off" in the tray icon's menu; off, the app doesn't read your combat log as you play.
+- Past logs go only when you choose them in the Backlog tab.
+- You choose who sees each upload (Public, Guild only or Private) in Settings > Visibility for new uploads, or on each upload in History, where you can also delete it.
+- Log out (Settings > Account) and the app sends nothing more.
+
+The installer shows this statement (`src-tauri/installer/privacy-and-licence.txt`, with the MIT licence) before it installs; `test/installer.test.ts` keeps it in step with the app's setting names.
 
 This program connects to no networked system other than the mythics.gg site (`https://mythics.gg`, or another site address set on purpose in its development settings, for testing against a local server), and sends nothing until the player has logged in with Battle.net through that site in their own browser. What it sends, and only as the player chooses:
 
@@ -105,6 +115,17 @@ This program connects to no networked system other than the mythics.gg site (`ht
 - **Summaries:** for past logs, by default, wipes other than each boss's best go as a summary only: the boss, when, how long, the boss's health at the end, and the player-list hash.
 
 Besides the `Logs` folder, it reads only where World of Warcraft is installed, to find that folder (the game's install path in the Windows registry, and the usual install folders). It never reads the game's memory or its other files, and never changes game settings. It keeps its sign-in in Windows Credential Manager, its settings and upload queue in its own folders, and a log file of its own that holds counts, offsets and error kinds, never a line from a combat log, a name or an address. It never sends anything to anyone but mythics.gg. The site's privacy policy is at <https://mythics.gg/privacy/>.
+
+## Uninstall
+
+Windows Settings > Apps > Installed apps > mythics.gg Logger > Uninstall. Logging out first (Settings > Account > Log out) also removes your sign-in from this computer and ends it on mythics.gg.
+
+The uninstaller removes the app and its Start with Windows entry. It leaves your data behind unless you tick its "Delete the application data" box, which removes both of the app's folders:
+
+- `%APPDATA%\gg.mythics.logger`: settings (`settings.json`), the upload queue (`queue.json` and `chunks\`), the live log's saved place (`tail.json`) and the Backlog tab's cache (`backlog-reports.json`).
+- `%LOCALAPPDATA%\gg.mythics.logger`: the app's own log file (`logs\`) and the window's WebView2 data.
+
+Either way, delete those folders by hand to remove them later. The sign-in token stays in Windows Credential Manager if you didn't log out: remove it in Control Panel > Credential Manager > Windows Credentials > Generic Credentials, `app-token.gg.mythics.logger`, or with `cmdkey /delete:app-token.gg.mythics.logger`. Your uploads stay on mythics.gg until you delete them there (My logs).
 
 ## Licence
 
