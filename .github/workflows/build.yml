@@ -119,7 +119,8 @@ jobs:
         run: sha256sum -- *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt
 
       # A draft: a maintainer checks it, then publishes it by hand. Every
-      # release's notes end with the code signing policy (SignPath
+      # release's notes start with what changed since the previous release and
+      # end with the code signing policy (SignPath
       # Foundation's terms ask for it on the download page).
       - name: Draft release
         env:
@@ -137,7 +138,13 @@ jobs:
             build="Unsigned build from $GITHUB_SHA by this repository's Build workflow (run $GITHUB_RUN_ID). Windows SmartScreen warns before the first run until releases are signed."
             signing="This build is unsigned while the project's application to the SignPath Foundation is pending."
           fi
+          # What changed since the previous release: every change reaches main
+          # through a pull request (the ruleset), so GitHub's list of the
+          # pull requests merged since the last release is the full trail.
+          changes=$(gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes"             -f tag_name="$GITHUB_REF_NAME" --jq .body)
           {
+            echo "$changes"
+            echo
             echo "$build SHA-256 sums are in SHA256SUMS.txt."
             echo
             echo "### Code signing policy"
