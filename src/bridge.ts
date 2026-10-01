@@ -30,6 +30,10 @@ export interface Bridge {
   /** A log page on the site, as the server gave it: the log, a raid boss,
    *  a pull or a key. The app opens only those, on the site in Settings. */
   openLog(path: string): Promise<void>;
+  /** Asks mythics.gg for the addon's latest version ("Check now"). */
+  addonCheck(): Promise<void>;
+  /** Installs, updates or repairs the addon, once the game is closed. */
+  addonInstall(): Promise<void>;
 }
 
 /** The real bridge, over Tauri's IPC. Loaded lazily so tests never import it. */
@@ -69,5 +73,7 @@ export async function tauriBridge(): Promise<Bridge> {
     deleteUpload: (id) => invoke("delete_upload", { id }),
     openSite: (path) => invoke("open_site", { path: path ?? null }),
     openLog: (path) => invoke("open_log", { path }),
+    addonCheck: () => invoke("addon_check"),
+    addonInstall: () => invoke("addon_install"),
   };
 }

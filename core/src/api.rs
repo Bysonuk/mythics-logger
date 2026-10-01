@@ -380,14 +380,18 @@ pub struct Api {
     token: Option<String>,
 }
 
+/// The app's HTTP client settings: its user agent and timeouts. The addon's
+/// updater (`addon.rs`) builds on the same.
+pub fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .user_agent(concat!("mythics.gg-logger/", env!("CARGO_PKG_VERSION")))
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(120))
+}
+
 impl Api {
     pub fn new(origin: &str) -> Self {
-        let http = reqwest::Client::builder()
-            .user_agent(concat!("mythics.gg-logger/", env!("CARGO_PKG_VERSION")))
-            .connect_timeout(Duration::from_secs(15))
-            .timeout(Duration::from_secs(120))
-            .build()
-            .expect("HTTP client");
+        let http = client_builder().build().expect("HTTP client");
         Self {
             origin: origin.trim_end_matches('/').to_string(),
             http,

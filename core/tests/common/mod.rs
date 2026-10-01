@@ -61,21 +61,32 @@ pub struct Request {
 }
 
 pub type Handler = dyn Fn(&Request) -> (u16, String) + Send + Sync;
+/// The same, replying with bytes (a zip).
+type BytesHandler = dyn Fn(&Request) -> (u16, Vec<u8>) + Send + Sync;
 
 /// A one-thread HTTP/1.1 stub on 127.0.0.1. Each response closes the
 /// connection, so the client opens a new one per request.
 pub struct Stub {
     pub origin: String,
     pub requests: Arc<Mutex<Vec<Request>>>,
-    handler: Arc<Mutex<Box<Handler>>>,
+    handler: Arc<Mutex<Box<BytesHandler>>>,
 }
 
 impl Stub {
     pub fn start(handler: impl Fn(&Request) -> (u16, String) + Send + Sync + 'static) -> Self {
+        Self::start_bytes(move |r| {
+            let (status, body) = handler(r);
+            (status, body.into_bytes())
+        })
+    }
+
+    pub fn start_bytes(
+        handler: impl Fn(&Request) -> (u16, Vec<u8>) + Send + Sync + 'static,
+    ) -> Self {
         let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
         let origin = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
         let requests = Arc::new(Mutex::new(Vec::new()));
-        let handler: Arc<Mutex<Box<Handler>>> = Arc::new(Mutex::new(Box::new(handler)));
+        let handler: Arc<Mutex<Box<BytesHandler>>> = Arc::new(Mutex::new(Box::new(handler)));
         let (reqs, h) = (requests.clone(), handler.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming() {
@@ -91,7 +102,10 @@ impl Stub {
     }
 
     pub fn set_handler(&self, handler: impl Fn(&Request) -> (u16, String) + Send + Sync + 'static) {
-        *self.handler.lock().unwrap() = Box::new(handler);
+        *self.handler.lock().unwrap() = Box::new(move |r| {
+            let (status, body) = handler(r);
+            (status, body.into_bytes())
+        });
     }
 
     pub fn taken(&self) -> Vec<Request> {
@@ -99,7 +113,7 @@ impl Stub {
     }
 }
 
-fn serve(stream: TcpStream, reqs: &Mutex<Vec<Request>>, handler: &Mutex<Box<Handler>>) {
+fn serve(stream: TcpStream, reqs: &Mutex<Vec<Request>>, handler: &Mutex<Box<BytesHandler>>) {
     let mut reader = BufReader::new(stream.try_clone().unwrap());
     let mut first = String::new();
     if reader.read_line(&mut first).unwrap_or(0) == 0 {
@@ -139,8 +153,9 @@ fn serve(stream: TcpStream, reqs: &Mutex<Vec<Request>>, handler: &Mutex<Box<Hand
     let mut s = stream;
     let _ = write!(
         s,
-        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{reply}",
+        "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
         reply.len()
     );
+    let _ = s.write_all(&reply);
     let _ = s.flush();
 }

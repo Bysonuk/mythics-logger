@@ -4,6 +4,7 @@
 //! game's memory, injects anything, or automates play. It's safe to run
 //! alongside the Warcraft Logs uploader: both only read the same file.
 
+mod addon;
 mod commands;
 mod links;
 mod settings;
@@ -117,6 +118,8 @@ pub fn run() {
                 wake: tokio::sync::Notify::new(),
                 signed_out_notice: AtomicBool::new(false),
                 archive: Mutex::new(Default::default()),
+                addon: Mutex::new(Default::default()),
+                addon_wake: tokio::sync::Notify::new(),
                 config_dir,
                 data_dir,
             });
@@ -182,6 +185,8 @@ pub fn run() {
             tauri::async_runtime::spawn(workers::upload_forever(h, s));
             let (h, s) = (app.handle().clone(), state.clone());
             tauri::async_runtime::spawn(workers::poll_uploads_forever(h, s));
+            let (h, s) = (app.handle().clone(), state.clone());
+            tauri::async_runtime::spawn(addon::addon_forever(h, s));
             let (h, s) = (app.handle().clone(), state);
             std::thread::Builder::new()
                 .name("archive".into())
@@ -216,6 +221,8 @@ pub fn run() {
             commands::delete_upload,
             commands::open_site,
             commands::open_log,
+            addon::addon_check,
+            addon::addon_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the mythics.gg Logger");

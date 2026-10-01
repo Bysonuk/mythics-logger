@@ -10,6 +10,8 @@ import licence from "../LICENSE?raw";
 import readme from "../README.md?raw";
 import settingsView from "../src/views/Settings.tsx?raw";
 import livePrompt from "../src/views/LivePrompt.tsx?raw";
+import addonPrompt from "../src/views/AddonPrompt.tsx?raw";
+import addonSettings from "../src/views/AddonSettings.tsx?raw";
 import shell from "../src-tauri/src/lib.rs?raw";
 
 const flat = (s: string) => s.replace(/\s+/g, " ").trim();
@@ -47,6 +49,24 @@ describe("installer privacy page", () => {
     expect(settingsView).toContain("Archive logs once uploaded");
     expect(page).toContain('"Delete archived logs after"');
     expect(settingsView).toContain("Delete archived logs after");
+    expect(page).toContain('"Install the mythics.gg addon?"');
+    expect(addonPrompt).toContain('"Install the mythics.gg addon?"');
+    expect(page).toContain('Settings > In-game addon > "Keep the addon up to date"');
+    expect(addonSettings).toContain('<Card title="In-game addon">');
+    expect(addonSettings).toContain("Keep the addon up to date");
+  });
+
+  it("says the addon is installed only if the player says yes, what it touches, and what's left after uninstalling", () => {
+    // Installing the addon ends the promise that the app never changes the
+    // game's files (this repository's issue 7): each place says exactly
+    // what it does instead.
+    for (const text of [page, readme]) {
+      expect(flat(text)).toContain("The mythics.gg addon is installed only if you say yes");
+      expect(flat(text)).toContain("sending nothing but those requests");
+      expect(flat(text)).toMatch(/never another addon's/);
+    }
+    expect(flat(page)).toContain("delete its Mythics and Mythics_ folders to remove it");
+    expect(flat(readme)).toContain("The app never puts back an addon you removed.");
   });
 
   it("says archiving moves and may delete logs, only if the player turns it on, and what's left after uninstalling", () => {

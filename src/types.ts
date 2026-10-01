@@ -31,6 +31,10 @@ export interface Settings {
   archive_uploaded: boolean;
   /** Delete the app's archives older than this many days: 0 (never), 30, 60 or 90. */
   archive_delete_after_days: number;
+  /** "Keep the addon up to date". Off unless the player says yes. */
+  addon_auto_update: boolean;
+  /** "Install the mythics.gg addon?" has been answered. */
+  addon_asked: boolean;
 }
 
 export type BacklogPulls = "kills_and_best_wipe" | "all";
@@ -174,6 +178,26 @@ export interface ArchiveView {
   busy: { path: string; name: string; pct: number } | null;
 }
 
+/** What Install or Update would do (core's `addon::Action`). */
+export type AddonAction = "nothing" | "install" | "update" | "repair" | "newer" | "unbuilt" | "linked";
+
+/** The mythics.gg in-game addon (src-tauri's `addon.rs`). */
+export interface AddonView {
+  /** The game's _retail_ folder is known, so the addon can go in. */
+  game_found: boolean;
+  /** Any of the addon's folders is in Interface\AddOns. */
+  present: boolean;
+  installed: string | null;
+  latest: string | null;
+  /** "unavailable": mythics.gg doesn't publish the addon yet. */
+  availability: "unknown" | "available" | "unavailable";
+  action: AddonAction | null;
+  status: "idle" | "checking" | "installing" | "waiting_for_game";
+  /** The last attempt's error code (`errorText`). */
+  error: string | null;
+  checked_ms: number | null;
+}
+
 export interface BacklogView {
   scanning: boolean;
   files_done: number;
@@ -210,6 +234,7 @@ export interface Snapshot {
   backlog: BacklogView;
   counts: Counts;
   archive: ArchiveView;
+  addon: AddonView;
 }
 
 export interface HistoryRow extends LogPlace {
@@ -254,5 +279,6 @@ export type SettingsPatch = Partial<
     | "backlog_pulls"
     | "archive_uploaded"
     | "archive_delete_after_days"
+    | "addon_auto_update"
   >
 >;
