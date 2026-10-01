@@ -116,6 +116,7 @@ pub fn run() {
                 cancel_sign_in: AtomicBool::new(false),
                 wake: tokio::sync::Notify::new(),
                 signed_out_notice: AtomicBool::new(false),
+                archive: Mutex::new(Default::default()),
                 config_dir,
                 data_dir,
             });
@@ -179,8 +180,12 @@ pub fn run() {
                 .spawn(move || workers::tail_forever(h, s))?;
             let (h, s) = (app.handle().clone(), state.clone());
             tauri::async_runtime::spawn(workers::upload_forever(h, s));
-            let (h, s) = (app.handle().clone(), state);
+            let (h, s) = (app.handle().clone(), state.clone());
             tauri::async_runtime::spawn(workers::poll_uploads_forever(h, s));
+            let (h, s) = (app.handle().clone(), state);
+            std::thread::Builder::new()
+                .name("archive".into())
+                .spawn(move || workers::archive_forever(h, s))?;
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -203,6 +208,8 @@ pub fn run() {
             commands::backlog_cancel,
             commands::backlog_upload,
             commands::backlog_pause,
+            commands::archive_log,
+            commands::open_archive_folder,
             commands::history,
             commands::recent_uploads,
             commands::set_upload_visibility,

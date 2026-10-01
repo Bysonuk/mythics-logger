@@ -8,6 +8,7 @@
 //! messages carry counts, byte offsets, ids and file names only.
 
 pub mod api;
+pub mod archive;
 pub mod auth;
 pub mod backlog;
 pub mod bosshp;

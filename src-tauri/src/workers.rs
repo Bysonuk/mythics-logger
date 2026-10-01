@@ -2,6 +2,7 @@
 //! asking the server whether what was sent has been parsed yet.
 
 use crate::state::{AppState, LiveStatus};
+use mythics_logger_core::archive::{self, ArchiveError, NotEligible, Outcome};
 use mythics_logger_core::queue::{Item, Origin};
 use mythics_logger_core::splitter::{Kind, Segment, Splitter};
 use mythics_logger_core::tailer::{is_combat_log_name, live_start, Event, Tailer};
@@ -449,6 +450,121 @@ pub async fn poll_uploads_forever(app: AppHandle, state: Arc<AppState>) {
             changed(&app);
         }
         gap = next_poll(gap, moved);
+    }
+}
+
+/// Archives one finished log (`mythics_logger_core::archive`), one at a time,
+/// showing progress; then forgets it in the Backlog tab. Run it on a
+/// background-priority thread. Errors are codes for the window.
+pub fn archive_one(app: &AppHandle, state: &AppState, file: &Path) -> Result<Outcome, String> {
+    let Some(logs_dir) = state.settings.lock().expect("settings").logs_dir.clone() else {
+        return Err("no_folder".into());
+    };
+    {
+        let mut a = state.archive.lock().expect("archive");
+        if a.busy.is_some() {
+            return Err("archive_busy".into());
+        }
+        a.busy = Some((file.to_path_buf(), 0, 0));
+    }
+    changed(app);
+    let pending = state.queue.lock().expect("queue").has_pending(file);
+    let mut last = Instant::now();
+    let r = archive::archive(
+        file,
+        &logs_dir,
+        &archive::Options::default(),
+        pending,
+        &mut |done, of| {
+            if last.elapsed() > Duration::from_millis(250) {
+                last = Instant::now();
+                state.archive.lock().expect("archive").busy = Some((file.to_path_buf(), done, of));
+                changed(app);
+            }
+        },
+    );
+    {
+        let mut a = state.archive.lock().expect("archive");
+        a.busy = None;
+        a.size = None;
+    }
+    if r.is_ok() {
+        let mut b = state.backlog.lock().expect("backlog");
+        b.reports.retain(|r| r.file.path != file);
+        b.pending.retain(|p| p.path != file);
+    }
+    match &r {
+        Ok(Outcome::Vanished) => log::info!("a log to archive was gone already: skipped"),
+        Ok(Outcome::Archived { .. }) => {}
+        Err(e) => log::warn!("couldn't archive a log: {}", e.code()),
+    }
+    changed(app);
+    r.map_err(|e| e.code().to_string())
+}
+
+/// How often the archive thread looks for logs to archive, and cleans up.
+const ARCHIVE_EVERY: Duration = Duration::from_secs(60);
+const CLEAN_UP_EVERY: Duration = Duration::from_secs(3600);
+/// A log that failed to archive (other than being in use) waits this long.
+const ARCHIVE_RETRY: Duration = Duration::from_secs(6 * 3600);
+
+/// "Archive logs once uploaded" and "Delete archived logs after", in the
+/// background for the app's lifetime, on a background-priority thread: each
+/// minute, archives any finished log whose pulls are all uploaded; each
+/// hour, deletes this app's archives older than the setting. Both are off by
+/// default, and nothing is touched while they are.
+pub fn archive_forever(app: AppHandle, state: Arc<AppState>) {
+    mythics_logger_core::priority::lower_this_thread();
+    let mut failed: HashMap<PathBuf, Instant> = HashMap::new();
+    let mut last_clean: Option<Instant> = None;
+    loop {
+        std::thread::sleep(ARCHIVE_EVERY);
+        let (on, days, dir) = {
+            let s = state.settings.lock().expect("settings");
+            (
+                s.archive_uploaded,
+                s.archive_delete_after_days,
+                s.logs_dir.clone(),
+            )
+        };
+        let Some(dir) = dir else { continue };
+        if days > 0 && last_clean.is_none_or(|t| t.elapsed() > CLEAN_UP_EVERY) {
+            last_clean = Some(Instant::now());
+            let r = archive::clean_up(
+                &dir,
+                Duration::from_secs(u64::from(days) * 86_400),
+                SystemTime::now(),
+            );
+            if r.deleted > 0 {
+                state.archive.lock().expect("archive").size = None;
+                changed(&app);
+            }
+        }
+        if !on {
+            continue;
+        }
+        failed.retain(|_, at| at.elapsed() < ARCHIVE_RETRY);
+        let files = state.queue.lock().expect("queue").finished_files();
+        for f in files {
+            if f.parent() != Some(dir.as_path()) || failed.contains_key(&f) {
+                continue;
+            }
+            // The quick checks first: nothing is opened unless they pass.
+            if archive::check(&f, &dir, SystemTime::now(), archive::QUIET_FOR, false).is_err() {
+                continue;
+            }
+            match archive_one(&app, &state, &f) {
+                Ok(_) => {}
+                // Tried again next time round.
+                Err(code)
+                    if code == NotEligible::InUse.code()
+                        || code == "archive_busy"
+                        || code == ArchiveError::DiskFull.code() => {}
+                Err(_) => {
+                    failed.insert(f, Instant::now());
+                }
+            }
+        }
     }
 }
 

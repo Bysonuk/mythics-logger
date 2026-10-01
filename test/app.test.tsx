@@ -359,6 +359,88 @@ describe("the Backlog tab", () => {
     expect(host.querySelector(".estimate")!.textContent).toBe("All: about 331 MB to upload.");
   });
 
+  it("offers Archive on each finished log, off with the reason when it can't be", async () => {
+    const s = snapshot();
+    const [live, past, raiderio] = s.backlog.files;
+    s.backlog.files = [
+      live!,
+      past!,
+      raiderio!,
+      { ...past!, path: "C:\\Logs\\WoWCombatLog-092726_190000.txt", name: "WoWCombatLog-092726_190000.txt", archive_block: "queued" },
+      { ...past!, path: "C:\\Logs\\WoWCombatLog-092826_100000.txt", name: "WoWCombatLog-092826_100000.txt", archive_block: "recent" },
+    ];
+    await mount(s, "backlog");
+    const rows = [...host.querySelectorAll<HTMLLIElement>(".file")];
+    const archiveButton = (row: HTMLLIElement) => [...row.querySelectorAll("button")].find((b) => b.textContent === "Archive") ?? null;
+    const why = (row: HTMLLIElement) => {
+      const id = archiveButton(row)!.getAttribute("aria-describedby");
+      return id ? document.getElementById(id)!.textContent : null;
+    };
+    // The file being logged live has none.
+    expect(archiveButton(rows[0]!)).toBeNull();
+    expect(archiveButton(rows[1]!)!.disabled).toBe(false);
+    expect(archiveButton(rows[1]!)!.getAttribute("aria-label")).toBe("Archive WoWCombatLog-092126_193000.txt");
+    expect(why(rows[1]!)).toBeNull();
+    expect(archiveButton(rows[2]!)!.disabled).toBe(true);
+    expect(why(rows[2]!)).toBe("Not in your Logs folder");
+    expect(archiveButton(rows[3]!)!.disabled).toBe(true);
+    expect(why(rows[3]!)).toBe("Still uploading");
+    expect(archiveButton(rows[4]!)!.disabled).toBe(true);
+    expect(why(rows[4]!)).toBe("The game is writing to it");
+    expect(text()).toContain("Archive moves a finished log into Logs\\MythicsLogsArchive as a .zip");
+  });
+
+  it("archives a log when selected, and says where it went", async () => {
+    const bridge = await mount(snapshot(), "backlog");
+    await click(button("Archive"));
+    expect(bridge.calls).toContainEqual(["archiveLog", "C:\\Logs\\WoWCombatLog-092126_193000.txt"]);
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(host.querySelector(".notice-good")!.textContent).toBe(
+      "Archived WoWCombatLog-092126_193000.txt into Logs\\MythicsLogsArchive as WoWCombatLog-092126_193000.zip.",
+    );
+  });
+
+  it("shows progress while a log is archived, and holds the others back", async () => {
+    const s = snapshot();
+    s.archive = { ...s.archive, busy: { path: "C:\\Logs\\WoWCombatLog-092126_193000.txt", name: "WoWCombatLog-092126_193000.txt", pct: 45 } };
+    s.backlog.files[2] = { ...s.backlog.files[2]!, archive_block: null };
+    await mount(s, "backlog");
+    const rows = [...host.querySelectorAll<HTMLLIElement>(".file")];
+    expect(rows[1]!.textContent).toContain("Archiving 45%");
+    const bar = rows[1]!.querySelector<HTMLProgressElement>(".file-archive progress")!;
+    expect(bar.value).toBe(45);
+    expect(bar.getAttribute("aria-label")).toBe("Archiving WoWCombatLog-092126_193000.txt");
+    const other = [...rows[2]!.querySelectorAll("button")].find((b) => b.textContent === "Archive")!;
+    expect(other.disabled).toBe(true);
+    expect(rows[2]!.textContent).toContain("Another log is being archived");
+  });
+
+  it("says when another program has the log open, and lets the player try again", async () => {
+    const bridge = await mount(snapshot(), "backlog");
+    bridge.archiveLog = () => Promise.reject("in_use");
+    await click(button("Archive"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(host.querySelector(".notice-bad")!.textContent).toContain("Another program has that log open");
+    const row = [...host.querySelectorAll<HTMLLIElement>(".file")][1]!;
+    expect(row.textContent).toContain("In use by another program");
+    expect(button("Archive").disabled).toBe(false);
+  });
+
+  it("says nothing went wrong when a log was already moved by another tool", async () => {
+    const bridge = await mount(snapshot(), "backlog");
+    bridge.archiveLog = () => Promise.reject("gone");
+    await click(button("Archive"));
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(host.querySelector(".notice-bad")).toBeNull();
+    expect(host.querySelector(".notice-good")!.textContent).toContain("had already been moved");
+  });
+
   it("looks for logs the first time it opens", async () => {
     const s = snapshot();
     s.backlog = { ...s.backlog, files: [], total: 0, done: 0 };
@@ -390,11 +472,50 @@ describe("the Settings tab", () => {
     expect(host.querySelector("#origin")).toBeNull();
   });
 
+  it("has an Archive section: both settings off, the folder's size, and a way to open it", async () => {
+    const bridge = await mount(snapshot(), "settings");
+    const card = [...host.querySelectorAll(".card")].find((c) => c.querySelector("h2")?.textContent === "Archive")!;
+    const box = [...card.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')].find((c) =>
+      c.parentElement!.textContent!.includes("Archive logs once uploaded"),
+    )!;
+    expect(box.checked).toBe(false);
+    expect(card.textContent).toContain("Never the log the game is writing, or one another program has open");
+    await click(box);
+    expect(bridge.calls).toContainEqual(["saveSettings", { archive_uploaded: true }]);
+
+    const days = card.querySelector<HTMLSelectElement>("#archive-days")!;
+    expect(card.querySelector('label[for="archive-days"]')!.textContent).toBe("Delete archived logs after");
+    expect(days.value).toBe("0");
+    expect([...days.options].map((o) => o.textContent)).toEqual(["Never", "30 days", "60 days", "90 days"]);
+    await act(async () => {
+      days.value = "60";
+      days.dispatchEvent(new Event("change", { bubbles: true }));
+    });
+    expect(bridge.calls).toContainEqual(["saveSettings", { archive_delete_after_days: 60 }]);
+    expect(card.textContent).toContain("Only archives this app made are deleted");
+
+    expect(card.textContent).toContain("1.2 GB in 14 files");
+    await click(button("Open archive folder"));
+    expect(bridge.calls).toContainEqual(["openArchiveFolder"]);
+  });
+
+  it("says when nothing has been archived yet", async () => {
+    const s = snapshot();
+    s.archive = { ...s.archive, exists: false, size: 0, files: 0 };
+    s.settings = { ...s.settings, archive_uploaded: true, archive_delete_after_days: 90 };
+    await mount(s, "settings");
+    expect(text()).toContain("Nothing archived yet");
+    expect(() => button("Open archive folder")).toThrow();
+    expect(host.querySelector<HTMLSelectElement>("#archive-days")!.value).toBe("90");
+  });
+
   it("says what the app reads and sends", async () => {
     await mount(snapshot(), "settings");
     expect(text()).toContain("What the app reads");
     expect(text()).toContain("never lines from your combat log or anyone's name");
     expect(text()).toContain("Private logs are never shown on the site");
+    // What it changes: nothing, unless the player archives logs.
+    expect(text()).toContain("Nothing, unless you archive logs");
   });
 
   it("logs out", async () => {

@@ -20,6 +20,8 @@ The owner's decisions, on #322:
 
 Later decisions (29 Sep 2026) are in the code and the README: live logging is off until the player chooses; live pulls compress at zstd level 10 and past logs at level 19 with long-distance matching; past logs send kills and each boss's best wipe in full and other wipes as summaries by default; the app asks the site before sending whether a raid member already uploaded a pull.
 
+On 1 Oct 2026 (this repository's issue 4) the owner decided the app may archive finished logs, which ends the plan's "never moves or deletes a log": off until the player turns it on, or selects Archive on a log, it moves a finished log into `Logs\MythicsLogsArchive` as a `.zip` and deletes the original only after checking the `.zip`; never the log the game is writing, one another program has open, or one with pulls still to upload. An optional clean-up, off by default, deletes the app's own archives after 30, 60 or 90 days. Where this page says the app never moves or deletes a log, that's the rule except for archiving the player chose. The README says exactly what it does.
+
 ## 1. Who uses it
 
 | Who | What they do in the app |
@@ -80,7 +82,7 @@ In this order, stopping at the first that has a `Logs` folder:
 
 ### Tailing live, with rotation
 
-- **Open read-only and share everything** (on Windows `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`), so the game keeps writing and anyone can still rename or delete the file. The app never locks, moves or deletes a log.
+- **Open read-only and share everything** (on Windows `FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE`), so the game keeps writing and anyone can still rename or delete the file. The app never locks, moves or deletes the log it follows (archiving, decided later, only takes finished logs: see above).
 - **Read from the last offset** in fixed buffers, and hold an incomplete last line until its newline arrives.
 - **Rotation:** a new `WoWCombatLog-*.txt` means a new session; the app finishes the old file and moves to the new one. A file that shrinks or is replaced (another uploader's "clear logs after upload") is read again from the start.
 - **Resume after a restart:** the app keeps its place in each file, so a restart loses nothing.
@@ -122,6 +124,8 @@ The app reads only enough to find boundaries; the site does the real reading. Ea
 | Delete a log | – | The uploader can delete any of their logs from the app or the site |
 | What to upload | Raids and Mythic+ only | |
 | Delete my logs after upload | Not offered | Many players use Warcraft Logs too; deleting could break it |
+| Archive logs once uploaded (1 Oct 2026, issue 4) | Off | Moves a finished log into `Logs\MythicsLogsArchive` as a `.zip`, checked before the original goes. Skips any log another program (such as the Warcraft Logs uploader) has open |
+| Delete archived logs after (1 Oct 2026, issue 4) | Never | 30, 60 or 90 days; only archives the app made |
 | Upload speed limit | No limit | |
 
 The app explains, in its own words, what gets uploaded: "Your combat log records everyone near you: other players' names, realms, gear and what they cast. We use it to build rankings and guild pages. Private logs are never shown on the site." With a link to the privacy policy.
@@ -153,7 +157,7 @@ The app is a file reader and an uploader, and must never look like anything else
 | Touches the game's network traffic | Interception |
 
 - **It only reads a text file** the game writes for the player, as Warcraft Logs' uploader does.
-- **It coexists with other uploaders.** Several programs can read the same file at once, so a guild can run this app and Archon side by side. It never deletes logs, and copes when another tool does.
+- **It coexists with other uploaders.** Several programs can read the same file at once, so a guild can run this app and Archon side by side. It never deletes a log, except by archiving it when the player turns that on or selects Archive (1 Oct 2026, above), and then never one another program has open. It copes when another tool moves or deletes a log.
 
 ## Sources
 

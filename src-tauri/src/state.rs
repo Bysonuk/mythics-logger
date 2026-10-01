@@ -2,6 +2,7 @@
 
 use crate::settings::Settings;
 use mythics_logger_core::api::{Api, FightRow, Main, UploadRow, Visibility};
+use mythics_logger_core::archive::{self, FolderSize, NotEligible};
 use mythics_logger_core::backlog::FileReport;
 use mythics_logger_core::plan::{self, BacklogPulls};
 use mythics_logger_core::queue::{now_ms, Counts, Item, Origin, Queue, State};
@@ -9,9 +10,10 @@ use mythics_logger_core::splitter::{Current, Kind, Segment};
 use mythics_logger_core::throttle::Throttle;
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 pub struct AppState {
     pub config_dir: PathBuf,
@@ -35,6 +37,72 @@ pub struct AppState {
     pub wake: tokio::sync::Notify,
     /// Set when a token was refused mid-upload.
     pub signed_out_notice: AtomicBool,
+    pub archive: Mutex<ArchiveState>,
+}
+
+/// Archiving finished logs (`mythics_logger_core::archive`).
+#[derive(Debug, Default)]
+pub struct ArchiveState {
+    /// The log being archived now: its path, bytes done and of. One at a
+    /// time, from the Backlog tab or "Archive logs once uploaded".
+    pub busy: Option<(PathBuf, u64, u64)>,
+    /// The archive folder's size, the Logs folder it's in, and when.
+    pub size: Option<(Instant, PathBuf, FolderSize)>,
+}
+
+impl ArchiveState {
+    /// The archive folder's size, measured at most once a minute (and again
+    /// after anything is archived or deleted).
+    pub fn size(&mut self, logs_dir: &Path) -> FolderSize {
+        match &self.size {
+            Some((at, dir, s)) if dir == logs_dir && at.elapsed() < Duration::from_secs(60) => *s,
+            _ => {
+                let s = archive::folder_size(logs_dir);
+                self.size = Some((Instant::now(), logs_dir.to_path_buf(), s));
+                s
+            }
+        }
+    }
+}
+
+/// The archive folder, for Settings, and the log being archived.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ArchiveView {
+    /// `<Logs>\MythicsLogsArchive`, once there's a Logs folder.
+    pub folder: Option<String>,
+    pub exists: bool,
+    pub size: u64,
+    pub files: u32,
+    pub busy: Option<ArchiveBusy>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ArchiveBusy {
+    pub path: String,
+    pub name: String,
+    pub pct: u32,
+}
+
+pub fn archive_view(a: &mut ArchiveState, logs_dir: Option<&Path>) -> ArchiveView {
+    let size = logs_dir.map(|d| a.size(d)).unwrap_or_default();
+    ArchiveView {
+        folder: logs_dir.map(|d| archive::folder(d).to_string_lossy().into_owned()),
+        exists: logs_dir.is_some_and(|d| archive::folder(d).is_dir()),
+        size: size.bytes,
+        files: size.files,
+        busy: a.busy.as_ref().map(|(p, done, of)| ArchiveBusy {
+            path: p.to_string_lossy().into_owned(),
+            name: p
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            pct: if *of == 0 {
+                0
+            } else {
+                (done * 100 / of).min(100) as u32
+            },
+        }),
+    }
 }
 
 impl AppState {
@@ -330,6 +398,11 @@ pub struct BacklogFileView {
     pub version: Option<u32>,
     /// The file being logged live right now: not offered here.
     pub live: bool,
+    /// Why it can't be archived now, from the quick checks (the newest log,
+    /// changed in the last 10 minutes, pulls still to upload, not directly
+    /// in the Logs folder); `None` if it may be. Whether another program has
+    /// it open is checked only when it's archived.
+    pub archive_block: Option<NotEligible>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -348,12 +421,45 @@ pub struct BacklogView {
     pub failed: u32,
 }
 
+/// What `backlog_view` needs to say whether each log may be archived: the
+/// newest combat log in the Logs folder, and now.
+pub struct ArchiveCheck<'a> {
+    pub newest: Option<&'a Path>,
+    pub now: SystemTime,
+}
+
+fn archive_block(
+    path: &Path,
+    modified_ms: u64,
+    live: bool,
+    logs_dir: Option<&Path>,
+    q: &Queue,
+    check: &ArchiveCheck<'_>,
+) -> Option<NotEligible> {
+    if live {
+        return Some(NotEligible::Newest);
+    }
+    let Some(dir) = logs_dir else {
+        return Some(NotEligible::NotInLogs);
+    };
+    archive::blocker(
+        path,
+        dir,
+        check.newest,
+        UNIX_EPOCH + Duration::from_millis(modified_ms),
+        check.now,
+        archive::QUIET_FOR,
+        q.has_pending(path),
+    )
+}
+
 pub fn backlog_view(
     b: &Backlog,
     q: &Queue,
     server: &HashSet<String>,
     logs_dir: Option<&std::path::Path>,
     live_file: Option<&std::path::Path>,
+    check: &ArchiveCheck<'_>,
 ) -> BacklogView {
     let mut files: Vec<BacklogFileView> = Vec::new();
     let folder_of = |p: &std::path::Path| {
@@ -400,6 +506,14 @@ pub fn backlog_view(
             advanced: r.header.as_ref().and_then(|h| h.advanced),
             version: r.header.as_ref().and_then(|h| h.version),
             live: live_file == Some(r.file.path.as_path()),
+            archive_block: archive_block(
+                &r.file.path,
+                r.file.modified_ms,
+                live_file == Some(r.file.path.as_path()),
+                logs_dir,
+                q,
+                check,
+            ),
         });
     }
     for f in &b.pending {
@@ -422,6 +536,14 @@ pub fn backlog_view(
             advanced: None,
             version: None,
             live: live_file == Some(f.path.as_path()),
+            archive_block: archive_block(
+                &f.path,
+                f.modified_ms,
+                live_file == Some(f.path.as_path()),
+                logs_dir,
+                q,
+                check,
+            ),
         });
     }
     files.sort_by_key(|f| std::cmp::Reverse(f.modified_ms));
@@ -462,6 +584,7 @@ pub struct Snapshot {
     pub pulls: Vec<PullView>,
     pub backlog: BacklogView,
     pub counts: Counts,
+    pub archive: ArchiveView,
 }
 
 pub fn snapshot(s: &AppState) -> Snapshot {
@@ -474,12 +597,34 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         (Some(d), Some(f)) => Some(PathBuf::from(d).join(f)),
         _ => None,
     };
+    let b = s.backlog.lock().expect("backlog");
+    // The newest log is the game's: the folder is read only when there are
+    // logs to show.
+    let newest = match (
+        &settings.logs_dir,
+        b.reports.is_empty() && b.pending.is_empty(),
+    ) {
+        (Some(d), false) => mythics_logger_core::tailer::newest_log(d)
+            .ok()
+            .flatten()
+            .map(|(p, _, _)| p),
+        _ => None,
+    };
     let backlog = backlog_view(
-        &s.backlog.lock().expect("backlog"),
+        &b,
         &q,
         &server,
         settings.logs_dir.as_deref(),
         live_path.as_deref(),
+        &ArchiveCheck {
+            newest: newest.as_deref(),
+            now: SystemTime::now(),
+        },
+    );
+    drop(b);
+    let archive = archive_view(
+        &mut s.archive.lock().expect("archive"),
+        settings.logs_dir.as_deref(),
     );
     Snapshot {
         signed_in: s.token.lock().expect("token").is_some(),
@@ -498,6 +643,7 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         ),
         counts: q.counts(),
         backlog,
+        archive,
         live,
         settings,
     }
@@ -648,6 +794,13 @@ mod tests {
     const RAID: &str = include_str!("../../core/tests/fixtures/raid_night.txt");
     const KEY: &str = include_str!("../../core/tests/fixtures/mplus_key.txt");
 
+    fn no_check() -> ArchiveCheck<'static> {
+        ArchiveCheck {
+            newest: None,
+            now: SystemTime::now(),
+        }
+    }
+
     fn setup(body: &str) -> (tempfile::TempDir, PathBuf, Queue) {
         let tmp = tempfile::tempdir().unwrap();
         let log = tmp.path().join("WoWCombatLog-092826_200101.txt");
@@ -785,14 +938,103 @@ mod tests {
             reports: vec![report],
             ..Default::default()
         };
-        let v = backlog_view(&b, &q, &server, log.parent(), None);
+        let v = backlog_view(&b, &q, &server, log.parent(), None, &no_check());
         let f = &v.files[0];
         assert_eq!((f.segments, f.already, f.queued), (3, 2, 1));
         assert_eq!((f.encounters, f.keys), (6, 1));
         assert!(!f.live);
         assert_eq!((v.done, v.total), (1, 2));
-        let v = backlog_view(&b, &q, &server, log.parent(), Some(&log));
+        let v = backlog_view(&b, &q, &server, log.parent(), Some(&log), &no_check());
         assert!(v.files[0].live, "the file being logged live is marked");
+    }
+
+    #[test]
+    fn backlog_says_which_logs_may_be_archived_and_why_not() {
+        let (_tmp, log, mut q) = setup(RAID);
+        let report = analyse(&describe(&log).unwrap(), |_| true).unwrap();
+        let segs: Vec<_> = report.uploadable().cloned().collect();
+        let b = Backlog {
+            reports: vec![report],
+            ..Default::default()
+        };
+        let later = ArchiveCheck {
+            newest: None,
+            now: SystemTime::now() + Duration::from_secs(3600),
+        };
+        let block = |q: &Queue, live: Option<&Path>, c: &ArchiveCheck<'_>| {
+            backlog_view(&b, q, &HashSet::new(), log.parent(), live, c).files[0].archive_block
+        };
+        // Just written: the game may still be writing to it.
+        assert_eq!(block(&q, None, &no_check()), Some(NotEligible::Recent));
+        assert_eq!(block(&q, None, &later), None);
+        assert_eq!(block(&q, Some(&log), &later), Some(NotEligible::Newest));
+        let newest = ArchiveCheck {
+            newest: Some(&log),
+            now: later.now,
+        };
+        assert_eq!(block(&q, None, &newest), Some(NotEligible::Newest));
+
+        // Its pulls waiting, then uploading, then done.
+        q.add(Item::new(
+            Origin::Backlog,
+            log.clone(),
+            segs[0].clone(),
+            Visibility::Public,
+            "eu",
+        ));
+        assert_eq!(block(&q, None, &later), Some(NotEligible::Queued));
+        assert!(q.finished_files().is_empty());
+        q.get_mut(&segs[0].sha256).unwrap().state = State::Uploading;
+        assert_eq!(block(&q, None, &later), Some(NotEligible::Queued));
+        q.get_mut(&segs[0].sha256).unwrap().state = State::Failed;
+        assert_eq!(block(&q, None, &later), None, "the player may archive it");
+        assert!(
+            q.finished_files().is_empty(),
+            "but it isn't archived by itself: a refused pull may be tried again"
+        );
+        q.get_mut(&segs[0].sha256).unwrap().state = State::Done;
+        assert_eq!(q.finished_files(), std::slice::from_ref(&log));
+
+        // Not directly in the Logs folder (another tool's archive folder).
+        let v = backlog_view(
+            &b,
+            &q,
+            &HashSet::new(),
+            Some(Path::new("C:/elsewhere")),
+            None,
+            &later,
+        );
+        assert_eq!(v.files[0].archive_block, Some(NotEligible::NotInLogs));
+        // As the window reads it.
+        assert_eq!(
+            serde_json::to_value(NotEligible::InUse).unwrap(),
+            serde_json::json!("in_use")
+        );
+    }
+
+    #[test]
+    fn the_archive_folder_and_the_log_being_archived() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut a = ArchiveState::default();
+        let v = archive_view(&mut a, None);
+        assert_eq!((v.folder, v.exists, v.size), (None, false, 0));
+        let v = archive_view(&mut a, Some(tmp.path()));
+        assert!(v.folder.unwrap().ends_with("MythicsLogsArchive"));
+        assert!(!v.exists);
+        let dir = archive::folder(tmp.path());
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("WoWCombatLog-092126_193000.zip"), vec![0u8; 1500]).unwrap();
+        // Measured at most once a minute, unless forgotten.
+        assert_eq!(archive_view(&mut a, Some(tmp.path())).size, 0);
+        a.size = None;
+        let log = tmp.path().join("WoWCombatLog-092126_193000.txt");
+        a.busy = Some((log, 300, 1200));
+        let v = archive_view(&mut a, Some(tmp.path()));
+        assert!(v.exists);
+        assert_eq!((v.size, v.files), (1500, 1));
+        let busy = v.busy.unwrap();
+        assert_eq!(busy.name, "WoWCombatLog-092126_193000.txt");
+        assert_eq!(busy.pct, 25);
     }
 
     #[test]
@@ -819,7 +1061,7 @@ mod tests {
             reports: vec![report],
             ..Default::default()
         };
-        let v = backlog_view(&b, &q, &HashSet::new(), log.parent(), None);
+        let v = backlog_view(&b, &q, &HashSet::new(), log.parent(), None, &no_check());
         let f = &v.files[0];
         assert_eq!(f.summaries, 1);
         let ratio = mythics_logger_core::chunker::BACKLOG_RATIO;
@@ -841,7 +1083,7 @@ mod tests {
                 "eu",
             ));
         }
-        let v = backlog_view(&b, &q, &HashSet::new(), log.parent(), None);
+        let v = backlog_view(&b, &q, &HashSet::new(), log.parent(), None, &no_check());
         assert_eq!((v.files[0].estimate_best, v.files[0].summaries), (0, 0));
     }
 
