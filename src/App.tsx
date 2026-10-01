@@ -4,6 +4,7 @@ import { Account, Notice, TABS, Tabs, Wordmark, type TabId } from "./components"
 import { errorText } from "./format";
 import type { Snapshot } from "./types";
 import { Backlog } from "./views/Backlog";
+import { AddonPrompt } from "./views/AddonPrompt";
 import { FirstRun } from "./views/FirstRun";
 import { History } from "./views/History";
 import { Live } from "./views/Live";
@@ -81,6 +82,18 @@ export function App({ bridge, initialTab = "live" }: { bridge: Bridge; initialTa
     return (
       <>
         <LivePrompt bridge={bridge} error={error} onError={onError} />
+        <div class="visually-hidden" role="status" aria-live="polite">
+          {message}
+        </div>
+      </>
+    );
+  }
+
+  // Asked once, as soon as the app knows where the game is.
+  if (!snap.settings.addon_asked && snap.addon.game_found) {
+    return (
+      <>
+        <AddonPrompt snap={snap} bridge={bridge} error={error} onError={onError} />
         <div class="visually-hidden" role="status" aria-live="polite">
           {message}
         </div>

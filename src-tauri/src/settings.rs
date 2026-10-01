@@ -50,6 +50,13 @@ pub struct Settings {
     /// Delete this app's archives older than this many days: 0 (never, the
     /// default), 30, 60 or 90.
     pub archive_delete_after_days: u32,
+    /// "Keep the addon up to date": install updates of the mythics.gg
+    /// in-game addon when the game isn't running. Off unless the player
+    /// says yes to "Install the mythics.gg addon?" or turns it on (the
+    /// owner's decision on mythics-logger issue 7).
+    pub addon_auto_update: bool,
+    /// That question has been answered, either way.
+    pub addon_asked: bool,
 }
 
 /// The choices for "Delete archived logs after", in days; 0 is never.
@@ -72,6 +79,8 @@ impl Default for Settings {
             backlog_pulls: BacklogPulls::KillsAndBestWipe,
             archive_uploaded: false,
             archive_delete_after_days: 0,
+            addon_auto_update: false,
+            addon_asked: false,
         }
     }
 }
@@ -98,6 +107,13 @@ impl Settings {
     pub fn choose_live(&mut self, on: bool) {
         self.live_logging = on;
         self.live_asked = true;
+    }
+
+    /// "Keep the addon up to date" on or off, from the first-run question
+    /// or Settings: either answers the question.
+    pub fn choose_addon(&mut self, on: bool) {
+        self.addon_auto_update = on;
+        self.addon_asked = true;
     }
 
     pub fn region(&self) -> String {
@@ -201,6 +217,24 @@ mod tests {
         let back = Settings::load(&p);
         assert!(back.archive_uploaded);
         assert_eq!(back.archive_delete_after_days, 60);
+    }
+
+    #[test]
+    fn the_addon_is_kept_up_to_date_only_if_the_player_says_so() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("settings.json");
+        // Settings saved before the addon existed: off, and asked.
+        std::fs::write(&p, r#"{"first_run_done":true,"live_asked":true}"#).unwrap();
+        let mut s = Settings::load(&p);
+        assert!(!s.addon_auto_update);
+        assert!(!s.addon_asked, "so the app asks");
+        for on in [true, false] {
+            s.choose_addon(on);
+            s.save(&p).unwrap();
+            let back = Settings::load(&p);
+            assert_eq!(back.addon_auto_update, on);
+            assert!(back.addon_asked, "not asked again");
+        }
     }
 
     #[test]

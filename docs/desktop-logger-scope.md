@@ -22,6 +22,8 @@ Later decisions (29 Sep 2026) are in the code and the README: live logging is of
 
 On 1 Oct 2026 (this repository's issue 4) the owner decided the app may archive finished logs, which ends the plan's "never moves or deletes a log": off until the player turns it on, or selects Archive on a log, it moves a finished log into `Logs\MythicsLogsArchive` as a `.zip` and deletes the original only after checking the `.zip`; never the log the game is writing, one another program has open, or one with pulls still to upload. An optional clean-up, off by default, deletes the app's own archives after 30, 60 or 90 days. Where this page says the app never moves or deletes a log, that's the rule except for archiving the player chose. The README says exactly what it does.
 
+Also on 1 Oct 2026 (this repository's issue 7; mythics.gg issue 419) the owner decided the app may install the mythics.gg in-game addon and keep it up to date, which ends the plan's "never changes addon folders" for the addon's own folders only. The app asks once, "Install the mythics.gg addon?"; Yes installs it and turns on "Keep the addon up to date", Not now leaves it off. Releases come from mythics.gg (`/data/addon/latest.json` and the zip it names), not CurseForge. The zip's size and SHA-256 are checked before anything is extracted, every entry is checked, and each of the addon's folders is replaced whole, only while the game isn't running. Never another addon's folder, and never `WTF`.
+
 ## 1. Who uses it
 
 | Who | What they do in the app |
@@ -126,6 +128,7 @@ The app reads only enough to find boundaries; the site does the real reading. Ea
 | Delete my logs after upload | Not offered | Many players use Warcraft Logs too; deleting could break it |
 | Archive logs once uploaded (1 Oct 2026, issue 4) | Off | Moves a finished log into `Logs\MythicsLogsArchive` as a `.zip`, checked before the original goes. Skips any log another program (such as the Warcraft Logs uploader) has open |
 | Delete archived logs after (1 Oct 2026, issue 4) | Never | 30, 60 or 90 days; only archives the app made |
+| Keep the addon up to date (1 Oct 2026, issue 7) | Off unless the player says yes to "Install the mythics.gg addon?" | Installs each new version of the mythics.gg addon from mythics.gg into `_retail_\Interface\AddOns` while the game isn't running; only the addon's own folders |
 | Upload speed limit | No limit | |
 
 The app explains, in its own words, what gets uploaded: "Your combat log records everyone near you: other players' names, realms, gear and what they cast. We use it to build rankings and guild pages. Private logs are never shown on the site." With a link to the privacy policy.
@@ -152,8 +155,8 @@ The app is a file reader and an uploader, and must never look like anything else
 | Opens the game's process, reads its memory, or takes a handle to it | That's what cheats do |
 | Injects code, hooks, overlays or DLLs into the game | The same |
 | Sends keys, clicks or chat to the game, or types `/combatlog` for the player | Automated control. The player turns logging on, or uses an in-game addon that does |
-| Changes game files or settings (`Config.wtf`, CVars, addon folders) | It explains settings instead |
-| Reads anything but the `Logs` folder (and where the game is installed, to find it) | Least privilege: not the `WTF` folder, saved variables or other games |
+| Changes game files or settings (`Config.wtf`, CVars, other addons' folders) | It explains settings instead. The one exception is the mythics.gg addon's own folders, and only if the player says yes (1 Oct 2026, above) |
+| Reads anything but the `Logs` folder (and where the game is installed, to find it) | Least privilege: not the `WTF` folder, saved variables or other games. With the addon kept up to date, it also reads the addon's own `.toc` files, and the names of running programs to wait until the game is closed |
 | Touches the game's network traffic | Interception |
 
 - **It only reads a text file** the game writes for the player, as Warcraft Logs' uploader does.

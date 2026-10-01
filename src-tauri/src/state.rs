@@ -40,6 +40,9 @@ pub struct AppState {
     pub archive: Mutex<ArchiveState>,
     /// Logs whose remaining pulls the player chose to skip (Backlog).
     pub skips: Mutex<Skips>,
+    /// The in-game addon (`addon.rs`), and the nudge for its job.
+    pub addon: Mutex<crate::addon::AddonState>,
+    pub addon_wake: tokio::sync::Notify,
 }
 
 /// Archiving finished logs (`mythics_logger_core::archive`).
@@ -602,6 +605,7 @@ pub struct Snapshot {
     pub backlog: BacklogView,
     pub counts: Counts,
     pub archive: ArchiveView,
+    pub addon: crate::addon::AddonView,
 }
 
 pub fn snapshot(s: &AppState) -> Snapshot {
@@ -664,6 +668,7 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         counts: q.counts(),
         backlog,
         archive,
+        addon: crate::addon::view(&s.addon.lock().expect("addon")),
         live,
         settings,
     }

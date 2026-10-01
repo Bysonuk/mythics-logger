@@ -3,6 +3,7 @@ import type { Bridge } from "../bridge";
 import { Account, Card, Notice, VisibilityRadios } from "../components";
 import { formatBytes, formatCount } from "../format";
 import type { SettingsPatch, Snapshot } from "../types";
+import { AddonSettings } from "./AddonSettings";
 import { LIVE_WHY } from "./LivePrompt";
 
 /** "Delete archived logs after": never (0), or after so many days. */
@@ -177,6 +178,8 @@ export function Settings({
         )}
       </Card>
 
+      <AddonSettings snap={snap} bridge={bridge} save={save} onError={onError} />
+
       <Card title="World of Warcraft folder">
         {s.logs_dir ? (
           <p class="mono path">{s.logs_dir}</p>
@@ -247,8 +250,9 @@ export function About({ snap, bridge }: { snap: Snapshot; bridge: Bridge }) {
     <Card title="About and privacy">
       <h3 class="group-title">What the app reads</h3>
       <p>
-        Only the combat log text files World of Warcraft writes to its Logs folder (<span class="mono">WoWCombatLog*.txt</span>). It never
-        reads the game's memory or other files, never changes game settings, and never controls the game.
+        Only the combat log text files World of Warcraft writes to its Logs folder (<span class="mono">WoWCombatLog*.txt</span>), and, if
+        you keep the mythics.gg addon up to date, its own folders' versions and the names of running programs, to wait until the game is
+        closed. It never reads the game's memory or other files, never changes game settings, and never controls the game.
       </p>
       <h3 class="group-title">What it sends</h3>
       <p>
@@ -266,6 +270,10 @@ export function About({ snap, bridge }: { snap: Snapshot; bridge: Bridge }) {
         Nothing, unless you archive logs: then it moves finished logs into Logs\MythicsLogsArchive as .zip files (Settings &gt; Archive, or
         Archive in Backlog), and deletes archives it made only if you choose "Delete archived logs after". It never archives the log the
         game is writing, or one another program has open.
+      </p>
+      <p>
+        And the mythics.gg addon, if you say yes: it installs and updates the addon's own folders in Interface\AddOns (Settings &gt;
+        In-game addon), only while the game isn't running. Never other addons or your saved settings.
       </p>
       <h3 class="group-title">Alongside Warcraft Logs</h3>
       <p>

@@ -749,6 +749,24 @@ progress {
   font-weight: 600;
 }
 
+/* The in-game addon: installed and latest versions (Settings) */
+
+.addon-versions {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 16px;
+  margin: 0;
+}
+
+.addon-versions dt {
+  color: var(--dim);
+}
+
+.addon-versions dd {
+  margin: 0;
+  font-weight: 600;
+}
+
 .scan {
   display: grid;
   gap: 6px;

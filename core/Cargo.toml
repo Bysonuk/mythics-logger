@@ -31,7 +31,9 @@ flate2 = { version = "=1.1.10", default-features = false, features = ["rust_back
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"
 # Only to compress past logs on a background-priority thread (priority.rs).
-windows-sys = { version = "0.59", features = ["Win32_System_Threading"] }
+# And to see whether World of Warcraft is running before the addon is
+# updated (addon.rs): the running programs' names only (Toolhelp).
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Threading"] }
 
 [dev-dependencies]
 tempfile = "3"

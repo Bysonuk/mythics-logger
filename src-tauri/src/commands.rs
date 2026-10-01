@@ -137,6 +137,8 @@ pub struct SettingsPatch {
     pub backlog_pulls: Option<BacklogPulls>,
     pub archive_uploaded: Option<bool>,
     pub archive_delete_after_days: Option<u32>,
+    /// "Keep the addon up to date"; answers the first-run question too.
+    pub addon_auto_update: Option<bool>,
 }
 
 /// The tray's "Turn live logging on/off": the same as the switch in Settings.
@@ -226,8 +228,23 @@ pub fn save_settings(
             }
             next.archive_delete_after_days = d;
         }
+        let addon_on = patch.addon_auto_update == Some(true) && !next.addon_auto_update;
+        if let Some(on) = patch.addon_auto_update {
+            if on != next.addon_auto_update {
+                log::info!(
+                    "keeping the addon up to date switched {}",
+                    if on { "on" } else { "off" }
+                );
+            }
+            next.choose_addon(on);
+        }
         next.save(&state.settings_path()).map_err(|_| "save")?;
         *s = next;
+        if addon_on {
+            // Switched on: look now, not in six hours.
+            state.addon.lock().expect("addon").check_now = true;
+            state.addon_wake.notify_one();
+        }
     }
     // The tail thread reads the setting every second; the tray says it now.
     crate::update_tray(&app);

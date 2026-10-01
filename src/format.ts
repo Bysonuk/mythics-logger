@@ -224,6 +224,22 @@ export function errorText(code: string): string {
       return "Nothing has been archived yet, so there's no archive folder to open.";
     case "explorer":
       return "File Explorer didn't open. Try again.";
+    case "addon_unavailable":
+      return "The addon isn't available from mythics.gg yet. The app installs it once it is.";
+    case "addon_bad_latest":
+      return "mythics.gg didn't say which addon version is current, so nothing was installed. Try again later.";
+    case "addon_checksum":
+      return "The addon's download didn't match its checksum, so nothing was installed. Select Check now to try again.";
+    case "addon_bad_zip":
+      return "The addon's download held something it shouldn't, so nothing was installed. Try again later.";
+    case "addon_no_game":
+      return "The app hasn't found World of Warcraft's _retail_ folder. Choose your World of Warcraft folder in Settings.";
+    case "addon_linked":
+      return "The addon's folder links to another folder, so the app leaves it alone.";
+    case "addon_in_use":
+      return "Another program has a file of the addon open, so it was left as it was. Close it, then try again.";
+    case "addon_io":
+      return "The app couldn't write the addon, so it was left as it was. Try again.";
     default:
       return "Something went wrong. Try again in a moment.";
   }

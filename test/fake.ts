@@ -58,6 +58,8 @@ export function snapshot(over: Partial<Snapshot> = {}): Snapshot {
       backlog_pulls: "kills_and_best_wipe",
       archive_uploaded: false,
       archive_delete_after_days: 0,
+      addon_auto_update: true,
+      addon_asked: true,
     },
     dev: false,
     version: "0.1.0",
@@ -186,6 +188,17 @@ export function snapshot(over: Partial<Snapshot> = {}): Snapshot {
       files: 14,
       busy: null,
     },
+    addon: {
+      game_found: true,
+      present: true,
+      installed: "2.1.0",
+      latest: "2.1.0",
+      availability: "available",
+      action: "nothing",
+      status: "idle",
+      error: null,
+      checked_ms: Date.now() - 4 * 3_600_000,
+    },
     counts: { live_waiting: 1, backlog_waiting: 624, backlog_done: 412, backlog_total: 1036, failed: 0, done: 413 },
     ...over,
   };
@@ -236,5 +249,7 @@ export function fakeBridge(
     openSite: rec("openSite", undefined),
     openLog: rec("openLog", undefined),
     recentUploads: rec("recentUploads", recent ?? []),
+    addonCheck: rec("addonCheck", undefined),
+    addonInstall: rec("addonInstall", undefined),
   };
 }

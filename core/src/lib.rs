@@ -7,6 +7,7 @@
 //! Privacy: nothing in this crate logs a raw log line or a name from one. Log
 //! messages carry counts, byte offsets, ids and file names only.
 
+pub mod addon;
 pub mod api;
 pub mod archive;
 pub mod auth;

@@ -19,6 +19,14 @@ async function bridge(): Promise<Bridge> {
       snap.settings.live_asked = q.has("live-off");
       snap.live = { ...snap.live, status: "off", file: null, zone: null, current: null, advanced: null };
     }
+    // ?ask-addon: the addon question; ?addon-update: an update waiting for the game.
+    if (q.has("ask-addon")) {
+      snap.settings.addon_asked = false;
+      snap.addon = { ...snap.addon, present: false, installed: null, action: null };
+    }
+    if (q.has("addon-update")) {
+      snap.addon = { ...snap.addon, installed: "2.0.0", action: "update", status: "waiting_for_game" };
+    }
     return fakeBridge(snap);
   }
   return tauriBridge();
