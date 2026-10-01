@@ -384,3 +384,138 @@ fn a_few_hundred_megabytes() {
     let out = run(&l, &l.old, &Options::default(), false).unwrap();
     assert!(matches!(out, Outcome::Archived { .. }));
 }
+
+// "Archive logs once uploaded": only a log whose every pull is uploaded, or
+// whose rest the player skipped (the owner's decision on issue 4).
+
+mod once_uploaded {
+    use super::*;
+    use mythics_logger_core::api::Visibility;
+    use mythics_logger_core::archive::{ready_to_archive, report_for, Skips};
+    use mythics_logger_core::backlog::ReportCache;
+    use mythics_logger_core::queue::{Item, Origin, Queue, State};
+    use std::collections::HashSet;
+
+    /// Tonight's two Plexus Sentinel pulls, finished an hour ago, and the
+    /// app's queue.
+    fn setup() -> (Logs, Queue, Vec<mythics_logger_core::splitter::Segment>) {
+        let l = logs();
+        let q = Queue::load(&l.dir.path().join("app"));
+        let mut cache = ReportCache::default();
+        let r = report_for(&l.old, &mut cache).unwrap();
+        let segs: Vec<_> = r.uploadable().cloned().collect();
+        assert_eq!(segs.len(), 2);
+        (l, q, segs)
+    }
+
+    fn add(
+        q: &mut Queue,
+        origin: Origin,
+        file: &Path,
+        s: &mythics_logger_core::splitter::Segment,
+        state: State,
+    ) {
+        q.add(Item::new(
+            origin,
+            file.to_path_buf(),
+            s.clone(),
+            Visibility::Public,
+            "eu",
+        ));
+        q.get_mut(&s.sha256).unwrap().state = state;
+    }
+
+    fn ready(l: &Logs, q: &Queue, server: &HashSet<String>, skipped: bool) -> bool {
+        let mut cache = ReportCache::default();
+        let r = report_for(&l.old, &mut cache);
+        ready_to_archive(&l.old, r.as_ref(), q, server, skipped)
+    }
+
+    #[test]
+    fn a_live_log_whose_early_pulls_were_never_queued_is_not_archived() {
+        // Live logging switched on after the first pull: only the second
+        // was queued, and it's uploaded.
+        let (l, mut q, segs) = setup();
+        add(&mut q, Origin::Live, &l.old, &segs[1], State::Done);
+        assert!(!ready(&l, &q, &HashSet::new(), false));
+        // Nor before the backlog has read it: the app can't tell.
+        assert!(!ready_to_archive(&l.old, None, &q, &HashSet::new(), false));
+        // Once the first is uploaded too (from Backlog), it may go.
+        add(&mut q, Origin::Backlog, &l.old, &segs[0], State::Done);
+        assert!(ready(&l, &q, &HashSet::new(), false));
+    }
+
+    #[test]
+    fn a_fully_uploaded_log_is_archived() {
+        let (l, mut q, segs) = setup();
+        // One sent by this app (as a summary counts too), one already on
+        // the site from another computer.
+        q.add(Item::summarised_wipe(
+            l.old.clone(),
+            segs[0].clone(),
+            Visibility::Public,
+            "eu",
+        ));
+        q.get_mut(&segs[0].sha256).unwrap().state = State::Done;
+        let server = HashSet::from([segs[1].sha256.clone()]);
+        assert!(ready(&l, &q, &server, false));
+        let out = run(&l, &l.old, &opts(), q.has_pending(&l.old)).unwrap();
+        assert!(matches!(out, Outcome::Archived { .. }));
+    }
+
+    #[test]
+    fn a_refused_or_waiting_pull_keeps_the_log() {
+        let (l, mut q, segs) = setup();
+        add(&mut q, Origin::Backlog, &l.old, &segs[0], State::Done);
+        add(&mut q, Origin::Backlog, &l.old, &segs[1], State::Failed);
+        assert!(
+            !ready(&l, &q, &HashSet::new(), false),
+            "it may be tried again"
+        );
+        q.get_mut(&segs[1].sha256).unwrap().state = State::Waiting;
+        assert!(!ready(&l, &q, &HashSet::new(), true), "not even skipped");
+    }
+
+    #[test]
+    fn a_log_whose_rest_was_skipped_is_archived() {
+        let (l, mut q, segs) = setup();
+        add(&mut q, Origin::Live, &l.old, &segs[1], State::Done);
+        let path = l.dir.path().join("app").join("skipped-logs.json");
+        let size = std::fs::metadata(&l.old).unwrap().len();
+        let mut skips = Skips::default();
+        skips.set(&l.old, size, true);
+        skips.save(&path).unwrap();
+        let skips = Skips::load(&path);
+        assert!(skips.is_skipped(&l.old, size));
+        assert!(
+            !skips.is_skipped(&l.old, size + 10),
+            "a log that grew since isn't"
+        );
+        assert!(ready(
+            &l,
+            &q,
+            &HashSet::new(),
+            skips.is_skipped(&l.old, size)
+        ));
+        let out = run(&l, &l.old, &opts(), q.has_pending(&l.old)).unwrap();
+        assert!(matches!(out, Outcome::Archived { .. }));
+        // Gone now: forgotten.
+        let mut skips = skips;
+        assert!(skips.retain_existing());
+        assert_eq!(skips.files().count(), 0);
+    }
+
+    #[test]
+    fn skipping_takes_a_logs_waiting_pulls_out_of_the_queue() {
+        let (l, mut q, segs) = setup();
+        add(&mut q, Origin::Backlog, &l.old, &segs[0], State::Uploading);
+        add(&mut q, Origin::Backlog, &l.old, &segs[1], State::Waiting);
+        assert_eq!(q.remove_waiting_of(&l.old), 1);
+        assert!(q.get(&segs[1].sha256).is_none());
+        assert_eq!(
+            q.get(&segs[0].sha256).unwrap().state,
+            State::Uploading,
+            "it finishes"
+        );
+    }
+}

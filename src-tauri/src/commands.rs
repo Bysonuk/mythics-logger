@@ -478,6 +478,34 @@ pub async fn archive_log(app: AppHandle, state: St<'_>, path: String) -> Result<
     }
 }
 
+/// "Skip the rest of this log" in the Backlog tab, or undoing it: the log's
+/// pulls not yet uploaded won't be (any still waiting leave the queue), and
+/// "Archive logs once uploaded" may archive it.
+#[tauri::command]
+pub fn backlog_skip(app: AppHandle, state: St<'_>, path: String, skip: bool) -> Result<(), String> {
+    let file = PathBuf::from(path);
+    let size = std::fs::metadata(&file)
+        .map_err(|_| "file_missing".to_string())?
+        .len();
+    if skip {
+        let mut q = state.queue.lock().expect("queue");
+        if q.remove_waiting_of(&file) > 0 {
+            q.save().map_err(|_| "save")?;
+        }
+    }
+    {
+        let mut s = state.skips.lock().expect("skips");
+        s.set(&file, size, skip);
+        s.save(&state.skips_path()).map_err(|_| "save")?;
+    }
+    log::info!(
+        "the rest of a past log {}",
+        if skip { "skipped" } else { "no longer skipped" }
+    );
+    changed(&app);
+    Ok(())
+}
+
 /// Opens `Logs\MythicsLogsArchive` in Explorer, if it's there.
 #[tauri::command]
 pub fn open_archive_folder(app: AppHandle, state: St<'_>) -> Result<(), String> {

@@ -129,8 +129,8 @@ export function Settings({
           <span>
             Archive logs once uploaded
             <span class="radio-hint">
-              Once every pull of a log is uploaded, the app moves it into Logs\MythicsLogsArchive as a .zip, about a tenth of its size.
-              Never the log the game is writing, or one another program has open.
+              Once every pull of a log is uploaded, or you skip the rest of it in Backlog, the app moves it into Logs\MythicsLogsArchive as
+              a .zip, about a tenth of its size. Never the log the game is writing, or one another program has open.
             </span>
           </span>
         </label>

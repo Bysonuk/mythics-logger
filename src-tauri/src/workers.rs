@@ -3,6 +3,7 @@
 
 use crate::state::{AppState, LiveStatus};
 use mythics_logger_core::archive::{self, ArchiveError, NotEligible, Outcome};
+use mythics_logger_core::backlog::ReportCache;
 use mythics_logger_core::queue::{Item, Origin};
 use mythics_logger_core::splitter::{Kind, Segment, Splitter};
 use mythics_logger_core::tailer::{is_combat_log_name, live_start, Event, Tailer};
@@ -544,13 +545,47 @@ pub fn archive_forever(app: AppHandle, state: Arc<AppState>) {
             continue;
         }
         failed.retain(|_, at| at.elapsed() < ARCHIVE_RETRY);
-        let files = state.queue.lock().expect("queue").finished_files();
+        // Logs with pulls in the queue, and logs whose rest was skipped.
+        let mut files = state.queue.lock().expect("queue").files();
+        {
+            let mut skips = state.skips.lock().expect("skips");
+            if skips.retain_existing() {
+                let _ = skips.save(&state.skips_path());
+            }
+            files.extend(skips.files().map(Path::to_path_buf));
+        }
+        files.sort();
+        files.dedup();
+        let cache_path = state.data_dir.join("backlog-reports.json");
+        let mut cache: Option<ReportCache> = None;
         for f in files {
             if f.parent() != Some(dir.as_path()) || failed.contains_key(&f) {
                 continue;
             }
             // The quick checks first: nothing is opened unless they pass.
             if archive::check(&f, &dir, SystemTime::now(), archive::QUIET_FOR, false).is_err() {
+                continue;
+            }
+            let Ok(size) = std::fs::metadata(&f).map(|m| m.len()) else {
+                continue;
+            };
+            let skipped = state.skips.lock().expect("skips").is_skipped(&f, size);
+            // Every pull in the log, as the Backlog tab reads it: from its
+            // saved report, or read now (not while holding the queue).
+            let report = if skipped {
+                None
+            } else {
+                let c = cache.get_or_insert_with(|| ReportCache::load(&cache_path));
+                let r = archive::report_for(&f, c);
+                let _ = c.save(&cache_path);
+                r
+            };
+            let ready = {
+                let q = state.queue.lock().expect("queue");
+                let server = state.server_shas.lock().expect("server");
+                archive::ready_to_archive(&f, report.as_ref(), &q, &server, skipped)
+            };
+            if !ready {
                 continue;
             }
             match archive_one(&app, &state, &f) {

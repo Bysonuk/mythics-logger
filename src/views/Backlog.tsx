@@ -12,7 +12,13 @@ export function shortFolder(path: string | null): string {
 }
 
 function selectable(f: BacklogFile): boolean {
-  return f.analysed && !f.live && f.segments - f.already - f.queued > 0;
+  return f.analysed && !f.live && !f.skipped && f.segments - f.already - f.queued > 0;
+}
+
+/** "Skip the rest of this log" is offered while a past log has pulls left
+ *  to upload, and stays to undo it. */
+function skippable(f: BacklogFile): boolean {
+  return f.analysed && !f.live && (f.skipped || f.segments - f.already - f.queued > 0);
 }
 
 /** The Backlog setting, in the player's words. */
@@ -103,6 +109,23 @@ export function Backlog({
       if (code === "in_use") setInUse(new Set(inUse).add(f.path));
       setArchived({ tone: "bad", text: errorText(code) });
       announce(errorText(code));
+    }
+  };
+  const skip_ = async (f: BacklogFile, skip: boolean) => {
+    try {
+      await bridge.backlogSkip(f.path, skip);
+      if (skip) {
+        const next = new Set(chosen);
+        next.delete(f.path);
+        setChosen(next);
+      }
+      announce(
+        skip
+          ? `The rest of ${f.name} won't be uploaded.${snap.settings.archive_uploaded ? " It will be archived." : ""}`
+          : `The rest of ${f.name} can be uploaded again.`,
+      );
+    } catch (e) {
+      onError(String(e));
     }
   };
   const chosenFiles = offered.filter((f) => chosen.has(f.path));
@@ -231,9 +254,14 @@ export function Backlog({
                 archiving={snap.archive}
                 inUse={inUse.has(f.path)}
                 onArchive={() => void archive(f)}
+                onSkip={(skip) => void skip_(f, skip)}
               />
             ))}
           </ul>
+          <p class="meta">
+            Skip the rest of a log you don't want to upload in full: what isn't uploaded yet won't be, and with Archive logs once uploaded
+            (Settings) the log is then archived. Select it again to undo.
+          </p>
           <p class="meta">
             Archive moves a finished log into Logs\MythicsLogsArchive as a .zip, about a tenth of its size, after checking the copy. Unzip
             it to get the log back.
@@ -258,6 +286,7 @@ function FileRow({
   archiving,
   inUse,
   onArchive,
+  onSkip,
 }: {
   file: BacklogFile;
   checked: boolean;
@@ -265,6 +294,7 @@ function FileRow({
   archiving: ArchiveView;
   inUse: boolean;
   onArchive: () => void;
+  onSkip: (skip: boolean) => void;
 }) {
   const id = `file-${f.path.replace(/[^a-zA-Z0-9]/g, "-")}`;
   const canPick = selectable(f);
@@ -273,6 +303,7 @@ function FileRow({
   let state: string;
   if (f.live) state = "Being logged live now";
   else if (!f.analysed) state = "Not read yet";
+  else if (f.skipped) state = left > 0 ? `Rest skipped: ${formatCount(left, "pull")} won't be uploaded` : "Rest skipped";
   else if (f.segments === 0) state = "Nothing to upload";
   else if (left === 0 && f.queued > 0) state = `${formatCount(f.queued, "pull")} waiting to upload`;
   else if (left === 0) state = "All uploaded";
@@ -296,7 +327,22 @@ function FileRow({
       </label>
       <span class="file-side">
         <span class="file-state">{state}</span>
-        {f.live ? null : <ArchiveControl file={f} id={id} archiving={archiving} inUse={inUse} onArchive={onArchive} />}
+        {f.live ? null : (
+          <span class="file-actions">
+            {skippable(f) ? (
+              <button
+                type="button"
+                class="button button-quiet button-small"
+                aria-pressed={f.skipped}
+                aria-label={`Skip the rest of ${f.name}`}
+                onClick={() => onSkip(!f.skipped)}
+              >
+                Skip the rest
+              </button>
+            ) : null}
+            <ArchiveControl file={f} id={id} archiving={archiving} inUse={inUse} onArchive={onArchive} />
+          </span>
+        )}
       </span>
     </li>
   );
