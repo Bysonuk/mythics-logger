@@ -544,7 +544,7 @@ impl Api {
 
     /// One log session: its raid bosses with their pulls, and its keys.
     pub async fn session(&self, id: &str) -> Result<LogSession, ApiError> {
-        if id.is_empty() || !id.bytes().all(|b| b.is_ascii_digit()) {
+        if !is_id(id) {
             return Err(ApiError::BadReply);
         }
         let resp = self
@@ -617,7 +617,12 @@ impl Api {
         Ok(page.uploads)
     }
 
+    /// `id` comes from the window: only a numeric upload id goes into the
+    /// path, so nothing else can steer the request elsewhere on the site.
     pub async fn set_visibility(&self, id: &str, visibility: Visibility) -> Result<(), ApiError> {
+        if !is_id(id) {
+            return Err(ApiError::BadReply);
+        }
         let body = serde_json::json!({ "visibility": visibility });
         self.send(
             self.http
@@ -628,7 +633,11 @@ impl Api {
         .map(|_| ())
     }
 
+    /// As `set_visibility`: a numeric upload id only.
     pub async fn delete_upload(&self, id: &str) -> Result<(), ApiError> {
+        if !is_id(id) {
+            return Err(ApiError::BadReply);
+        }
         self.send(
             self.http
                 .delete(self.url(&format!("/api/logger/uploads/{id}"))),
@@ -636,6 +645,12 @@ impl Api {
         .await
         .map(|_| ())
     }
+}
+
+/// A server id as the API gives it: digits only, and short enough for a
+/// 64-bit number. Nothing else is put in a request's path.
+fn is_id(s: &str) -> bool {
+    !s.is_empty() && s.len() <= 19 && s.bytes().all(|b| b.is_ascii_digit())
 }
 
 /// Takes only the character and guild from the server's `main`; anything
@@ -765,6 +780,48 @@ mod tests {
         assert_eq!(s.raid[0].pulls.len(), 2);
         assert_eq!(s.mplus[0].key.url.as_deref(), Some("/logs/12/keys/7/"));
         assert_eq!(s.mplus[0].bosses[0].in_key.as_deref(), Some("7"));
+    }
+
+    #[tokio::test]
+    async fn only_a_numeric_upload_id_goes_in_the_path() {
+        // Nothing listens on this port: a request that's sent comes back
+        // Offline, one refused before sending comes back BadReply.
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", dead.local_addr().unwrap());
+        drop(dead);
+        let api = Api::new(&origin).with_token(Some("t".into()));
+        for bad in [
+            "",
+            "u1",
+            "../tokens",
+            "41/chunks/0",
+            "41?x=1",
+            "41#",
+            "%34%31",
+            " 41",
+            "12345678901234567890",
+        ] {
+            assert!(
+                matches!(
+                    api.set_visibility(bad, Visibility::Private).await,
+                    Err(ApiError::BadReply)
+                ),
+                "{bad:?}"
+            );
+            assert!(
+                matches!(api.delete_upload(bad).await, Err(ApiError::BadReply)),
+                "{bad:?}"
+            );
+        }
+        // A real id is sent (and finds nobody there).
+        assert!(matches!(
+            api.set_visibility("41", Visibility::Private).await,
+            Err(ApiError::Offline)
+        ));
+        assert!(matches!(
+            api.delete_upload("41").await,
+            Err(ApiError::Offline)
+        ));
     }
 
     #[test]
