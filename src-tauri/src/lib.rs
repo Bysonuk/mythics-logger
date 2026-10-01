@@ -118,6 +118,9 @@ pub fn run() {
                 wake: tokio::sync::Notify::new(),
                 signed_out_notice: AtomicBool::new(false),
                 archive: Mutex::new(Default::default()),
+                skips: Mutex::new(mythics_logger_core::archive::Skips::load(
+                    &data_dir.join("skipped-logs.json"),
+                )),
                 addon: Mutex::new(Default::default()),
                 addon_wake: tokio::sync::Notify::new(),
                 config_dir,
@@ -214,6 +217,7 @@ pub fn run() {
             commands::backlog_upload,
             commands::backlog_pause,
             commands::archive_log,
+            commands::backlog_skip,
             commands::open_archive_folder,
             commands::history,
             commands::recent_uploads,

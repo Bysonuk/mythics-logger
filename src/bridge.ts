@@ -21,6 +21,8 @@ export interface Bridge {
   archiveLog(path: string): Promise<string>;
   /** Opens the archive folder in File Explorer. */
   openArchiveFolder(): Promise<void>;
+  /** "Skip the rest of this log", or undoing it. */
+  backlogSkip(path: string, skip: boolean): Promise<void>;
   history(): Promise<History>;
   /** The newest uploads' status and pages, in one request. */
   recentUploads(): Promise<UploadStatus[]>;
@@ -67,6 +69,7 @@ export async function tauriBridge(): Promise<Bridge> {
     backlogPause: (paused) => invoke("backlog_pause", { paused }),
     archiveLog: (path) => invoke("archive_log", { path }),
     openArchiveFolder: () => invoke("open_archive_folder"),
+    backlogSkip: (path, skip) => invoke("backlog_skip", { path, skip }),
     history: () => invoke("history"),
     recentUploads: () => invoke("recent_uploads"),
     setUploadVisibility: (id, visibility) => invoke("set_upload_visibility", { id, visibility }),

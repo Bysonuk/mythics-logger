@@ -128,6 +128,7 @@ export function snapshot(over: Partial<Snapshot> = {}): Snapshot {
           version: null,
           live: true,
           archive_block: "newest",
+          skipped: false,
         },
         {
           path: "C:\\Logs\\WoWCombatLog-092126_193000.txt",
@@ -149,6 +150,7 @@ export function snapshot(over: Partial<Snapshot> = {}): Snapshot {
           version: 22,
           live: false,
           archive_block: null,
+          skipped: false,
         },
         {
           path: "C:\\Logs\\RaiderIOLogsArchive\\WoWCombatLog-112120_120130.txt",
@@ -170,6 +172,7 @@ export function snapshot(over: Partial<Snapshot> = {}): Snapshot {
           version: null,
           live: false,
           archive_block: "not_in_logs",
+          skipped: false,
         },
       ],
       total_size: 11_286_000_000,
@@ -239,6 +242,7 @@ export function fakeBridge(
     backlogPause: rec("backlogPause", undefined),
     archiveLog: rec("archiveLog", "WoWCombatLog-092126_193000.zip"),
     openArchiveFolder: rec("openArchiveFolder", undefined),
+    backlogSkip: rec("backlogSkip", undefined),
     history: rec("history", history ?? { rows: [], offline: false }),
     setUploadVisibility: rec("setUploadVisibility", undefined),
     deleteUpload: rec("deleteUpload", undefined),

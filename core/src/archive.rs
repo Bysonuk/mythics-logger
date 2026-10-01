@@ -29,8 +29,11 @@
 //! `.zip` files this app made: named like a combat log, and carrying
 //! [`COMMENT`] as the zip's comment.
 
+use crate::backlog::{self, FileReport, ReportCache};
+use crate::queue::{Queue, State};
 use crate::tailer::{is_combat_log_name, newest_log};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::fs::File;
 use std::io::{self, BufWriter, Read, Write};
 use std::path::{Path, PathBuf};
@@ -573,6 +576,109 @@ pub fn verify(
         return Err(ArchiveError::Verify);
     }
     Ok(())
+}
+
+/// Logs whose remaining pulls the player chose to skip in the Backlog tab
+/// ("Skip the rest of this log"): "Archive logs once uploaded" may archive
+/// them without those pulls. Kept by path with the file's size then, so a
+/// log that has grown since isn't taken as skipped.
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Skips {
+    #[serde(default)]
+    files: HashMap<PathBuf, u64>,
+}
+
+impl Skips {
+    pub fn load(path: &Path) -> Self {
+        std::fs::read(path)
+            .ok()
+            .and_then(|b| serde_json::from_slice(&b).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        if let Some(p) = path.parent() {
+            std::fs::create_dir_all(p)?;
+        }
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_vec(self)?)?;
+        std::fs::rename(tmp, path)
+    }
+
+    /// Skips the rest of a log as it is now (`size`), or stops skipping it.
+    pub fn set(&mut self, file: &Path, size: u64, skip: bool) {
+        if skip {
+            self.files.insert(file.to_path_buf(), size);
+        } else {
+            self.files.remove(file);
+        }
+    }
+
+    /// Whether the player skipped the rest of this log, at this size.
+    pub fn is_skipped(&self, file: &Path, size: u64) -> bool {
+        self.files.get(file) == Some(&size)
+    }
+
+    pub fn files(&self) -> impl Iterator<Item = &Path> {
+        self.files.keys().map(PathBuf::as_path)
+    }
+
+    /// Forgets logs that are gone (archived, or moved by another tool).
+    pub fn retain_existing(&mut self) -> bool {
+        let before = self.files.len();
+        self.files.retain(|p, _| p.exists());
+        self.files.len() != before
+    }
+}
+
+/// Whether "Archive logs once uploaded" may take a log: nothing of it still
+/// waiting or uploading, and either the player skipped the rest of it, or
+/// every pull and key in it (as the Backlog tab reads the file: `report`)
+/// is uploaded, by this app (or sent as a summary) or already on the site
+/// (`on_server`). A refused pull keeps the log, so it can be tried again.
+/// Without a report, the app can't tell, so it doesn't.
+///
+/// So a log whose early pulls were never queued (live logging switched on
+/// mid-session) stays until they're uploaded or skipped. The Archive button
+/// in the Backlog tab doesn't ask this: there the player decides.
+pub fn ready_to_archive(
+    file: &Path,
+    report: Option<&FileReport>,
+    q: &Queue,
+    on_server: &HashSet<String>,
+    skipped: bool,
+) -> bool {
+    if q.has_pending(file) {
+        return false;
+    }
+    if skipped {
+        return true;
+    }
+    let Some(r) = report.filter(|r| r.complete && r.file.path == file) else {
+        return false;
+    };
+    let refused = q
+        .items()
+        .iter()
+        .any(|i| i.file == file && i.state == State::Failed);
+    !refused
+        && r.uploadable().all(|s| {
+            q.get(&s.sha256).is_some_and(|i| i.state == State::Done)
+                || on_server.contains(&s.sha256)
+        })
+}
+
+/// What the Backlog tab knows of a log's pulls and keys: its saved report,
+/// while the file is unchanged, or else the file read now (streaming) and
+/// the report saved. `None` if it can't be read.
+pub fn report_for(file: &Path, cache: &mut ReportCache) -> Option<FileReport> {
+    let f = backlog::describe(file).ok()?;
+    if let Some(r) = cache.get(&f) {
+        return Some(r.clone());
+    }
+    let r = backlog::analyse(&f, |_| true).ok()?;
+    cache.put(r.clone());
+    Some(r)
 }
 
 /// Named as this app names archives: a combat log's name, as a `.zip`.
