@@ -5,6 +5,7 @@
 //! alongside the Warcraft Logs uploader: both only read the same file.
 
 mod addon;
+mod app_update;
 mod commands;
 mod links;
 mod settings;
@@ -93,6 +94,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let config_dir = app.path().app_config_dir()?;
             let data_dir = app.path().app_data_dir()?;
@@ -122,6 +124,8 @@ pub fn run() {
                     &data_dir.join("skipped-logs.json"),
                 )),
                 addon: Mutex::new(Default::default()),
+                app_update: Mutex::new(Default::default()),
+                app_update_wake: tokio::sync::Notify::new(),
                 addon_wake: tokio::sync::Notify::new(),
                 config_dir,
                 data_dir,
@@ -190,6 +194,8 @@ pub fn run() {
             tauri::async_runtime::spawn(workers::poll_uploads_forever(h, s));
             let (h, s) = (app.handle().clone(), state.clone());
             tauri::async_runtime::spawn(addon::addon_forever(h, s));
+            let (h, s) = (app.handle().clone(), state.clone());
+            tauri::async_runtime::spawn(app_update::app_update_forever(h, s));
             let (h, s) = (app.handle().clone(), state);
             std::thread::Builder::new()
                 .name("archive".into())
@@ -227,6 +233,9 @@ pub fn run() {
             commands::open_log,
             addon::addon_check,
             addon::addon_install,
+            app_update::app_update_check,
+            app_update::app_update_later,
+            app_update::app_update_install,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the mythics.gg Logger");

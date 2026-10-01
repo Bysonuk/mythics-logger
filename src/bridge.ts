@@ -36,6 +36,12 @@ export interface Bridge {
   addonCheck(): Promise<void>;
   /** Installs, updates or repairs the addon, once the game is closed. */
   addonInstall(): Promise<void>;
+  /** Asks GitHub for a newer version of the app ("Check for updates"). */
+  appUpdateCheck(): Promise<void>;
+  /** Hides "Version X is ready" until the app next starts. */
+  appUpdateLater(): Promise<void>;
+  /** Downloads, checks and installs the new version; the app restarts. */
+  appUpdateInstall(): Promise<void>;
 }
 
 /** The real bridge, over Tauri's IPC. Loaded lazily so tests never import it. */
@@ -78,5 +84,8 @@ export async function tauriBridge(): Promise<Bridge> {
     openLog: (path) => invoke("open_log", { path }),
     addonCheck: () => invoke("addon_check"),
     addonInstall: () => invoke("addon_install"),
+    appUpdateCheck: () => invoke("app_update_check"),
+    appUpdateLater: () => invoke("app_update_later"),
+    appUpdateInstall: () => invoke("app_update_install"),
   };
 }

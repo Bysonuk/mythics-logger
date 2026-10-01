@@ -27,6 +27,18 @@ async function bridge(): Promise<Bridge> {
     if (q.has("addon-update")) {
       snap.addon = { ...snap.addon, installed: "2.0.0", action: "update", status: "waiting_for_game" };
     }
+    // ?app-update: a new version of the app on offer.
+    if (q.has("app-update")) {
+      snap.app_update = {
+        ...snap.app_update,
+        available: {
+          version: "0.1.2",
+          notes: "## What's Changed\n* Install the mythics.gg addon and keep it up to date by @Bysonuk in https://github.com/Bysonuk/mythics-logger/pull/9",
+          date: "2026-10-02T09:00:00Z",
+        },
+        offer: true,
+      };
+    }
     return fakeBridge(snap);
   }
   return tauriBridge();

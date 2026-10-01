@@ -224,6 +224,12 @@ export function errorText(code: string): string {
       return "Nothing has been archived yet, so there's no archive folder to open.";
     case "explorer":
       return "File Explorer didn't open. Try again.";
+    case "update_check":
+      return "The app couldn't check for a new version of itself. It tries again in a few hours.";
+    case "update_install":
+      return "The new version couldn't be downloaded or didn't pass its signature check, so nothing changed. Try again later.";
+    case "update_gone":
+      return "That version isn't on offer any more. Select Check for updates.";
     case "addon_unavailable":
       return "The addon isn't available from mythics.gg yet. The app installs it once it is.";
     case "addon_bad_latest":
@@ -243,6 +249,23 @@ export function errorText(code: string): string {
     default:
       return "Something went wrong. Try again in a moment.";
   }
+}
+
+/** A release's notes as a list of changes: GitHub's "What's Changed"
+ *  lines, without the "by @someone in <link>" each ends with. */
+export function releaseNotes(body: string | null | undefined): string[] {
+  return (body ?? "")
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => /^[*-] /.test(l))
+    .map((l) =>
+      l
+        .slice(2)
+        .replace(/ by @[\w-]+ in https:\/\/\S+$/, "")
+        .replace(/\*\*/g, "")
+        .trim(),
+    )
+    .filter((l) => l.length > 0);
 }
 
 /** Why a log's Archive button is off, in a few words. */

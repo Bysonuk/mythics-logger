@@ -5,6 +5,7 @@ import { errorText } from "./format";
 import type { Snapshot } from "./types";
 import { Backlog } from "./views/Backlog";
 import { AddonPrompt } from "./views/AddonPrompt";
+import { UpdateOffer } from "./views/AppUpdate";
 import { FirstRun } from "./views/FirstRun";
 import { History } from "./views/History";
 import { Live } from "./views/Live";
@@ -114,6 +115,7 @@ export function App({ bridge, initialTab = "live" }: { bridge: Bridge; initialTa
         <Account main={snap.main} />
       </header>
       <main class="content" id="main">
+        <UpdateOffer snap={snap} bridge={bridge} onError={onError} />
         {TABS.map((t) => (
           <section
             key={t.id}
