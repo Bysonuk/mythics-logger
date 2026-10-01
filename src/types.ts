@@ -27,6 +27,10 @@ export interface Settings {
   /** Which of a past log's pulls go in full: every kill and each boss's
    *  best wipe (the other wipes as summaries), or all of them. */
   backlog_pulls: BacklogPulls;
+  /** Archive a finished log once all its pulls are uploaded. Off by default. */
+  archive_uploaded: boolean;
+  /** Delete the app's archives older than this many days: 0 (never), 30, 60 or 90. */
+  archive_delete_after_days: number;
 }
 
 export type BacklogPulls = "kills_and_best_wipe" | "all";
@@ -153,6 +157,21 @@ export interface BacklogFile {
   advanced: boolean | null;
   version: number | null;
   live: boolean;
+  /** Why it can't be archived now; null if it can. */
+  archive_block: ArchiveBlock | null;
+}
+
+/** Why a log can't be archived (src-tauri's `archive_block`, and the codes
+ *  an attempt can fail with). */
+export type ArchiveBlock = "newest" | "recent" | "queued" | "in_use" | "not_in_logs" | "gone";
+
+/** The archive folder, Logs\MythicsLogsArchive, and the log being archived. */
+export interface ArchiveView {
+  folder: string | null;
+  exists: boolean;
+  size: number;
+  files: number;
+  busy: { path: string; name: string; pct: number } | null;
 }
 
 export interface BacklogView {
@@ -190,6 +209,7 @@ export interface Snapshot {
   pulls: Pull[];
   backlog: BacklogView;
   counts: Counts;
+  archive: ArchiveView;
 }
 
 export interface HistoryRow extends LogPlace {
@@ -232,5 +252,7 @@ export type SettingsPatch = Partial<
     | "first_run_done"
     | "live_logging"
     | "backlog_pulls"
+    | "archive_uploaded"
+    | "archive_delete_after_days"
   >
 >;

@@ -240,6 +240,30 @@ impl Queue {
         self.items.iter_mut().find(|i| i.sha256 == sha)
     }
 
+    /// Whether any pull or key from `file` is still waiting or uploading:
+    /// such a log isn't archived (`crate::archive`).
+    pub fn has_pending(&self, file: &Path) -> bool {
+        self.items
+            .iter()
+            .any(|i| i.file == file && matches!(i.state, State::Waiting | State::Uploading))
+    }
+
+    /// Every log file with pulls in the queue, all of them uploaded (none
+    /// waiting, uploading or refused): the logs "Archive logs once uploaded"
+    /// may archive. A refused pull keeps its log, so it can be tried again.
+    pub fn finished_files(&self) -> Vec<PathBuf> {
+        let mut files: Vec<PathBuf> = self.items.iter().map(|i| i.file.clone()).collect();
+        files.sort();
+        files.dedup();
+        files.retain(|f| {
+            self.items
+                .iter()
+                .filter(|i| &i.file == f)
+                .all(|i| i.state == State::Done)
+        });
+        files
+    }
+
     pub fn contains(&self, sha: &str) -> bool {
         self.get(sha).is_some()
     }

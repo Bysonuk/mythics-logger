@@ -43,7 +43,17 @@ pub struct Settings {
     /// other wipes as summaries; or all of them. Live logging always sends
     /// every pull.
     pub backlog_pulls: BacklogPulls,
+    /// Move a finished log into `Logs\MythicsLogsArchive` as a `.zip` once
+    /// every pull of it this app queued is uploaded. Off until the player
+    /// turns it on (the owner's decision on mythics-logger issue 4).
+    pub archive_uploaded: bool,
+    /// Delete this app's archives older than this many days: 0 (never, the
+    /// default), 30, 60 or 90.
+    pub archive_delete_after_days: u32,
 }
+
+/// The choices for "Delete archived logs after", in days; 0 is never.
+pub const ARCHIVE_DAYS: [u32; 4] = [0, 30, 60, 90];
 
 impl Default for Settings {
     fn default() -> Self {
@@ -60,6 +70,8 @@ impl Default for Settings {
             live_logging: false,
             live_asked: false,
             backlog_pulls: BacklogPulls::KillsAndBestWipe,
+            archive_uploaded: false,
+            archive_delete_after_days: 0,
         }
     }
 }
@@ -169,6 +181,26 @@ mod tests {
             BacklogPulls::KillsAndBestWipe,
             "past logs send kills and each boss's best wipe unless the player chooses"
         );
+    }
+
+    #[test]
+    fn archiving_is_off_until_the_player_turns_it_on_and_is_kept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let p = tmp.path().join("settings.json");
+        // Settings saved before archiving existed.
+        std::fs::write(&p, r#"{"first_run_done":true,"live_logging":true}"#).unwrap();
+        let s = Settings::load(&p);
+        assert!(!s.archive_uploaded, "off by default");
+        assert_eq!(s.archive_delete_after_days, 0, "never deleted by default");
+        let s = Settings {
+            archive_uploaded: true,
+            archive_delete_after_days: 60,
+            ..s
+        };
+        s.save(&p).unwrap();
+        let back = Settings::load(&p);
+        assert!(back.archive_uploaded);
+        assert_eq!(back.archive_delete_after_days, 60);
     }
 
     #[test]

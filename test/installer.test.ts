@@ -42,5 +42,22 @@ describe("installer privacy page", () => {
     expect(settingsView).toContain('legend="Visibility for new uploads"');
     expect(page).toContain("Log out (Settings > Account)");
     expect(settingsView).toContain('<Card title="Account">');
+    expect(page).toContain('Settings > Archive > "Archive logs once uploaded"');
+    expect(settingsView).toContain('<Card title="Archive">');
+    expect(settingsView).toContain("Archive logs once uploaded");
+    expect(page).toContain('"Delete archived logs after"');
+    expect(settingsView).toContain("Delete archived logs after");
+  });
+
+  it("says archiving moves and may delete logs, only if the player turns it on, and what's left after uninstalling", () => {
+    // Archiving ends the app's old promise that it never changes or deletes
+    // a combat log (this repository's issue 4): each place says exactly
+    // what it does instead.
+    for (const text of [page, readme]) {
+      expect(flat(text)).toContain("Archiving is off until you turn it on.");
+      expect(flat(text)).toContain("It changes no combat log unless you archive logs");
+    }
+    expect(flat(page)).toContain("Logs you archived stay in the game's Logs\\MythicsLogsArchive folder");
+    expect(flat(readme)).toContain("Logs you archived stay where they are");
   });
 });

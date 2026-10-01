@@ -5,6 +5,7 @@ use crate::settings::{valid_origin, Settings};
 use crate::state::{history_rows, snapshot, AppState, HistoryRow, Snapshot};
 use crate::workers::changed;
 use mythics_logger_core::api::{ApiError, UploadRow, Visibility};
+use mythics_logger_core::archive::{self, Outcome};
 use mythics_logger_core::auth::{AuthError, Loopback, Pkce};
 use mythics_logger_core::backlog::{self, ReportCache};
 use mythics_logger_core::plan::{self, BacklogPulls};
@@ -134,6 +135,8 @@ pub struct SettingsPatch {
     /// Answers the first-run question too, whichever way.
     pub live_logging: Option<bool>,
     pub backlog_pulls: Option<BacklogPulls>,
+    pub archive_uploaded: Option<bool>,
+    pub archive_delete_after_days: Option<u32>,
 }
 
 /// The tray's "Turn live logging on/off": the same as the switch in Settings.
@@ -207,6 +210,21 @@ pub fn save_settings(
         }
         if let Some(b) = patch.backlog_pulls {
             next.backlog_pulls = b;
+        }
+        if let Some(on) = patch.archive_uploaded {
+            if on != next.archive_uploaded {
+                log::info!(
+                    "archiving uploaded logs switched {}",
+                    if on { "on" } else { "off" }
+                );
+            }
+            next.archive_uploaded = on;
+        }
+        if let Some(d) = patch.archive_delete_after_days {
+            if !crate::settings::ARCHIVE_DAYS.contains(&d) {
+                return Err("save".into());
+            }
+            next.archive_delete_after_days = d;
         }
         next.save(&state.settings_path()).map_err(|_| "save")?;
         *s = next;
@@ -398,10 +416,21 @@ pub fn backlog_upload(
             .cloned()
             .collect()
     };
+    // Not a log being archived right now: it's about to go.
+    let archiving = state
+        .archive
+        .lock()
+        .expect("archive")
+        .busy
+        .as_ref()
+        .map(|(p, _, _)| p.clone());
     let mut added = 0;
     {
         let mut q = state.queue.lock().expect("queue");
-        for r in &reports {
+        for r in reports
+            .iter()
+            .filter(|r| archiving.as_deref() != Some(r.file.path.as_path()))
+        {
             for item in
                 plan::queue_items(r, mode, visibility, &region, |s| server.contains(&s.sha256))
             {
@@ -428,6 +457,44 @@ pub fn backlog_pause(app: AppHandle, state: St<'_>, paused: bool) -> Result<(), 
     state.wake.notify_one();
     changed(&app);
     Ok(())
+}
+
+/// Archives one finished log from the Backlog tab, on a background-priority
+/// thread, with progress in the snapshot. Returns the archive's name.
+#[tauri::command]
+pub async fn archive_log(app: AppHandle, state: St<'_>, path: String) -> Result<String, String> {
+    let state: Arc<AppState> = state.inner().clone();
+    let file = PathBuf::from(path);
+    let rx = mythics_logger_core::priority::spawn_low(move || {
+        crate::workers::archive_one(&app, &state, &file)
+    });
+    match rx.await.map_err(|_| "archive_io".to_string())?? {
+        Outcome::Archived { zip, .. } => Ok(zip
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default()),
+        // Moved or deleted by another tool already: nothing to do.
+        Outcome::Vanished => Err("gone".into()),
+    }
+}
+
+/// Opens `Logs\MythicsLogsArchive` in Explorer, if it's there.
+#[tauri::command]
+pub fn open_archive_folder(app: AppHandle, state: St<'_>) -> Result<(), String> {
+    let dir = state
+        .settings
+        .lock()
+        .expect("settings")
+        .logs_dir
+        .clone()
+        .ok_or("no_folder")?;
+    let folder = archive::folder(&dir);
+    if !folder.is_dir() {
+        return Err("no_archive".into());
+    }
+    app.opener()
+        .open_path(folder.to_string_lossy(), None::<&str>)
+        .map_err(|_| "explorer".to_string())
 }
 
 #[derive(Debug, Serialize)]

@@ -8,6 +8,9 @@ publish = false
 
 [dependencies]
 base64 = "0.22"
+# The archive's CRC check against the original (archive.rs). Exact versions:
+# these touch the player's logs.
+crc32fast = "=1.5.2"
 # Only to give old logs' offset-less times this computer's UTC offset.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 log = "0.4"
@@ -19,6 +22,11 @@ sha2 = "0.10"
 thiserror = "2"
 tokio = { version = "1", features = ["time", "sync", "macros", "rt"] }
 zstd = "0.13"
+# Archiving finished logs (archive.rs): deflate only, through flate2's pure
+# Rust backend; none of the crate's other formats or its encryption.
+zip = { version = "=8.6.0", default-features = false, features = ["deflate-flate2"] }
+# Only to pick the zip crate's deflate backend: miniz_oxide, pure Rust.
+flate2 = { version = "=1.1.10", default-features = false, features = ["rust_backend"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.55"

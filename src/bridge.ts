@@ -17,6 +17,10 @@ export interface Bridge {
   backlogCancel(): Promise<void>;
   backlogUpload(paths: string[], visibility: Visibility): Promise<number>;
   backlogPause(paused: boolean): Promise<void>;
+  /** Archives one finished log into Logs\MythicsLogsArchive; the archive's name. */
+  archiveLog(path: string): Promise<string>;
+  /** Opens the archive folder in File Explorer. */
+  openArchiveFolder(): Promise<void>;
   history(): Promise<History>;
   /** The newest uploads' status and pages, in one request. */
   recentUploads(): Promise<UploadStatus[]>;
@@ -57,6 +61,8 @@ export async function tauriBridge(): Promise<Bridge> {
     backlogCancel: () => invoke("backlog_cancel"),
     backlogUpload: (paths, visibility) => invoke("backlog_upload", { paths, visibility }),
     backlogPause: (paused) => invoke("backlog_pause", { paused }),
+    archiveLog: (path) => invoke("archive_log", { path }),
+    openArchiveFolder: () => invoke("open_archive_folder"),
     history: () => invoke("history"),
     recentUploads: () => invoke("recent_uploads"),
     setUploadVisibility: (id, visibility) => invoke("set_upload_visibility", { id, visibility }),

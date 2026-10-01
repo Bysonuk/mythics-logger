@@ -362,6 +362,12 @@ select {
   background: none;
 }
 
+/* A row's own action (Archive in Backlog): still a 32 px target. */
+.button-small {
+  min-height: 32px;
+  padding: 4px 12px;
+}
+
 .button-big {
   min-height: 44px;
   padding: 10px 22px;
@@ -708,6 +714,28 @@ progress {
   text-align: right;
 }
 
+.file-side {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.file-archive {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.file-archive progress {
+  width: 120px;
+}
+
+.archive-size {
+  font-weight: 600;
+}
+
 .scan {
   display: grid;
   gap: 6px;
@@ -819,8 +847,14 @@ progress {
   .file {
     grid-template-columns: auto 1fr;
   }
-  .file-state {
+  .file-side {
     grid-column: 2;
+    justify-items: start;
+  }
+  .file-state {
     text-align: left;
+  }
+  .file-archive {
+    justify-content: flex-start;
   }
 }

@@ -1,8 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import type { Bridge } from "../bridge";
 import { Card, Notice, VisibilitySelect } from "../components";
-import { fileContents, formatBytes, formatCount, formatDate, VISIBILITY_LABEL } from "../format";
-import type { BacklogFile, BacklogPulls, Snapshot, Visibility } from "../types";
+import { archiveBlockText, errorText, fileContents, formatBytes, formatCount, formatDate, VISIBILITY_LABEL } from "../format";
+import type { ArchiveBlock, ArchiveView, BacklogFile, BacklogPulls, Snapshot, Visibility } from "../types";
 
 /** "…\Logs": the folder's last part, so the path fits and still says where. */
 export function shortFolder(path: string | null): string {
@@ -49,6 +49,10 @@ export function Backlog({
   const [chosen, setChosen] = useState<Set<string>>(new Set());
   const [visibility, setVisibility] = useState<Visibility>(snap.settings.default_visibility);
   const [asked, setAsked] = useState(false);
+  /** The last archive's result, shown above the list. */
+  const [archived, setArchived] = useState<{ tone: "good" | "bad"; text: string } | null>(null);
+  /** A log another program had open when the player tried: said on its row. */
+  const [inUse, setInUse] = useState<Set<string>>(new Set());
 
   // Look for past logs the first time the tab opens.
   useEffect(() => {
@@ -78,6 +82,27 @@ export function Backlog({
       );
     } catch (e) {
       onError(String(e));
+    }
+  };
+  const archive = async (f: BacklogFile) => {
+    setArchived(null);
+    try {
+      const zip = await bridge.archiveLog(f.path);
+      const text = `Archived ${f.name} into Logs\\MythicsLogsArchive as ${zip}.`;
+      setArchived({ tone: "good", text });
+      announce(text);
+    } catch (e) {
+      const code = String(e);
+      if (code === "gone") {
+        // Moved by another tool first: nothing to do, and nothing wrong.
+        const text = `${f.name} had already been moved, so there was nothing to archive.`;
+        setArchived({ tone: "good", text });
+        announce(text);
+        return;
+      }
+      if (code === "in_use") setInUse(new Set(inUse).add(f.path));
+      setArchived({ tone: "bad", text: errorText(code) });
+      announce(errorText(code));
     }
   };
   const chosenFiles = offered.filter((f) => chosen.has(f.path));
@@ -195,18 +220,52 @@ export function Backlog({
 
       {b.files.length > 0 ? (
         <Card title="Logs found">
+          {archived ? <Notice tone={archived.tone}>{archived.text}</Notice> : null}
           <ul class="files">
             {b.files.map((f) => (
-              <FileRow key={f.path} file={f} checked={chosen.has(f.path)} onToggle={() => toggle(f.path)} />
+              <FileRow
+                key={f.path}
+                file={f}
+                checked={chosen.has(f.path)}
+                onToggle={() => toggle(f.path)}
+                archiving={snap.archive}
+                inUse={inUse.has(f.path)}
+                onArchive={() => void archive(f)}
+              />
             ))}
           </ul>
+          <p class="meta">
+            Archive moves a finished log into Logs\MythicsLogsArchive as a .zip, about a tenth of its size, after checking the copy. Unzip
+            it to get the log back.
+          </p>
         </Card>
       ) : null}
     </div>
   );
 }
 
-function FileRow({ file: f, checked, onToggle }: { file: BacklogFile; checked: boolean; onToggle: () => void }) {
+/** Why a log can't be archived now, if it can't. */
+export function archiveReason(f: BacklogFile, archiving: ArchiveView): string | null {
+  if (archiving.busy && archiving.busy.path !== f.path) return "Another log is being archived";
+  const block: ArchiveBlock | null = f.archive_block;
+  return block ? archiveBlockText(block) : null;
+}
+
+function FileRow({
+  file: f,
+  checked,
+  onToggle,
+  archiving,
+  inUse,
+  onArchive,
+}: {
+  file: BacklogFile;
+  checked: boolean;
+  onToggle: () => void;
+  archiving: ArchiveView;
+  inUse: boolean;
+  onArchive: () => void;
+}) {
   const id = `file-${f.path.replace(/[^a-zA-Z0-9]/g, "-")}`;
   const canPick = selectable(f);
   const date = formatDate(f.first_time ?? new Date(f.modified_ms).toISOString());
@@ -235,7 +294,58 @@ function FileRow({ file: f, checked, onToggle }: { file: BacklogFile; checked: b
           {f.analysed && f.version == null ? " · Older log: times are approximate" : ""}
         </span>
       </label>
-      <span class="file-state">{state}</span>
+      <span class="file-side">
+        <span class="file-state">{state}</span>
+        {f.live ? null : <ArchiveControl file={f} id={id} archiving={archiving} inUse={inUse} onArchive={onArchive} />}
+      </span>
     </li>
+  );
+}
+
+/** A log's Archive button: off, with the reason beside it, when the log
+ *  can't be archived now; progress while it's being archived. */
+function ArchiveControl({
+  file: f,
+  id,
+  archiving,
+  inUse,
+  onArchive,
+}: {
+  file: BacklogFile;
+  id: string;
+  archiving: ArchiveView;
+  inUse: boolean;
+  onArchive: () => void;
+}) {
+  if (archiving.busy?.path === f.path) {
+    return (
+      <span class="file-archive" role="status">
+        <span class="meta">Archiving {archiving.busy.pct}%</span>
+        <progress max={100} value={archiving.busy.pct} aria-label={`Archiving ${f.name}`} />
+      </span>
+    );
+  }
+  const blocked = archiveReason(f, archiving);
+  // Another program had it open when the player tried: said, but the
+  // button stays on, to try again once that program lets go.
+  const reason = blocked ?? (inUse ? archiveBlockText("in_use") : null);
+  return (
+    <span class="file-archive">
+      <button
+        type="button"
+        class="button button-quiet button-small"
+        disabled={blocked !== null}
+        aria-describedby={reason ? `${id}-archive-why` : undefined}
+        aria-label={`Archive ${f.name}`}
+        onClick={onArchive}
+      >
+        Archive
+      </button>
+      {reason ? (
+        <span class="meta" id={`${id}-archive-why`}>
+          {reason}
+        </span>
+      ) : null}
+    </span>
   );
 }

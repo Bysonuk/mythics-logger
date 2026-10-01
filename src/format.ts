@@ -1,7 +1,7 @@
 // Numbers, sizes, times and the app's words, in en-GB, matching the site
 // (web/src/app/format.ts): "26 Sept 2026, 11:16 BST", "4 hours ago".
 
-import type { BacklogFile, Fight, Kind, Pull, Visibility } from "./types";
+import type { ArchiveBlock, BacklogFile, Fight, Kind, Pull, Visibility } from "./types";
 
 const DAY = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", year: "numeric" });
 const DAY_TIME = new Intl.DateTimeFormat("en-GB", {
@@ -199,8 +199,50 @@ export function errorText(code: string): string {
       return "The log file was moved or deleted before it could be sent.";
     case "file_changed":
       return "The log file changed before it could be sent.";
+    case "newest":
+    case "recent":
+      return "The game may still be writing to that log, so it wasn't archived. Try again once you've stopped logging for 10 minutes.";
+    case "queued":
+      return "That log still has pulls to upload, so it wasn't archived. Archive it once they're uploaded.";
+    case "in_use":
+      return "Another program has that log open, such as the Warcraft Logs uploader, so it wasn't archived. Close it there, then try again.";
+    case "not_in_logs":
+      return "Only logs directly in your Logs folder can be archived.";
+    case "archive_busy":
+      return "Another log is being archived. Try again when it's done.";
+    case "archive_exists":
+      return "An archive with that log's name is already in MythicsLogsArchive, so the log was kept. Move or rename that archive, then try again.";
+    case "archive_verify":
+      return "The archive didn't match the log when checked, so the log was kept and the archive removed. Try again.";
+    case "archive_changed":
+      return "The log changed while it was being archived, so it was kept. Try again later.";
+    case "disk_full":
+      return "There isn't enough disk space for the archive, so the log was kept. Free some space, then try again.";
+    case "archive_io":
+      return "The app couldn't write the archive, so the log was kept. Try again.";
+    case "no_archive":
+      return "Nothing has been archived yet, so there's no archive folder to open.";
+    case "explorer":
+      return "File Explorer didn't open. Try again.";
     default:
       return "Something went wrong. Try again in a moment.";
+  }
+}
+
+/** Why a log's Archive button is off, in a few words. */
+export function archiveBlockText(code: ArchiveBlock): string {
+  switch (code) {
+    case "newest":
+    case "recent":
+      return "The game is writing to it";
+    case "queued":
+      return "Still uploading";
+    case "in_use":
+      return "In use by another program";
+    case "not_in_logs":
+      return "Not in your Logs folder";
+    case "gone":
+      return "Already moved";
   }
 }
 

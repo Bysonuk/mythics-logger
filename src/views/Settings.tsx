@@ -1,8 +1,17 @@
 import { useState } from "preact/hooks";
 import type { Bridge } from "../bridge";
 import { Account, Card, Notice, VisibilityRadios } from "../components";
+import { formatBytes, formatCount } from "../format";
 import type { SettingsPatch, Snapshot } from "../types";
 import { LIVE_WHY } from "./LivePrompt";
+
+/** "Delete archived logs after": never (0), or after so many days. */
+export const ARCHIVE_DAYS: { days: number; label: string }[] = [
+  { days: 0, label: "Never" },
+  { days: 30, label: "30 days" },
+  { days: 60, label: "60 days" },
+  { days: 90, label: "90 days" },
+];
 
 const SPEEDS: { kbps: number; label: string }[] = [
   { kbps: 0, label: "No limit" },
@@ -107,6 +116,67 @@ export function Settings({
         </label>
       </Card>
 
+      <Card title="Archive">
+        <label class="check">
+          <input
+            type="checkbox"
+            checked={s.archive_uploaded}
+            onChange={(e) => {
+              const on = (e.currentTarget as HTMLInputElement).checked;
+              void save({ archive_uploaded: on }, on ? "Logs will be archived once uploaded." : "Logs won't be archived by themselves.");
+            }}
+          />
+          <span>
+            Archive logs once uploaded
+            <span class="radio-hint">
+              Once every pull of a log is uploaded, the app moves it into Logs\MythicsLogsArchive as a .zip, about a tenth of its size.
+              Never the log the game is writing, or one another program has open.
+            </span>
+          </span>
+        </label>
+
+        <div class="field">
+          <label for="archive-days">Delete archived logs after</label>
+          <select
+            id="archive-days"
+            aria-describedby="archive-days-hint"
+            value={String(s.archive_delete_after_days)}
+            onChange={(e) => void save({ archive_delete_after_days: Number((e.currentTarget as HTMLSelectElement).value) })}
+          >
+            {ARCHIVE_DAYS.map((o) => (
+              <option key={o.days} value={String(o.days)}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <p class="meta" id="archive-days-hint">
+          Only archives this app made are deleted, never anything else in the folder. Unzip an archive to get its log back.
+        </p>
+
+        {snap.archive.exists ? (
+          <p class="actions">
+            <span class="archive-size">
+              {formatBytes(snap.archive.size)} in {formatCount(snap.archive.files, "file")}
+            </span>
+            <button
+              type="button"
+              class="button button-quiet"
+              onClick={() =>
+                bridge
+                  .openArchiveFolder()
+                  .then(() => undefined)
+                  .catch((e: unknown) => onError(String(e)))
+              }
+            >
+              Open archive folder
+            </button>
+          </p>
+        ) : (
+          <p class="meta">Nothing archived yet. You can also archive a log yourself in Backlog.</p>
+        )}
+      </Card>
+
       <Card title="World of Warcraft folder">
         {s.logs_dir ? (
           <p class="mono path">{s.logs_dir}</p>
@@ -191,8 +261,17 @@ export function About({ snap, bridge }: { snap: Snapshot; bridge: Bridge }) {
         Your sign-in, in Windows Credential Manager. Uploads waiting to be sent. The app's own log file records counts and problems only,
         never lines from your combat log or anyone's name.
       </p>
+      <h3 class="group-title">What it changes</h3>
+      <p>
+        Nothing, unless you archive logs: then it moves finished logs into Logs\MythicsLogsArchive as .zip files (Settings &gt; Archive, or
+        Archive in Backlog), and deletes archives it made only if you choose "Delete archived logs after". It never archives the log the
+        game is writing, or one another program has open.
+      </p>
       <h3 class="group-title">Alongside Warcraft Logs</h3>
-      <p>Safe to run alongside the Warcraft Logs uploader: both only read the same file, and this app never changes or deletes it.</p>
+      <p>
+        Safe to run alongside the Warcraft Logs uploader: both read the log the game is writing, and this app never changes or deletes
+        it. Archiving skips any log the uploader has open.
+      </p>
       <p class="actions">
         <button type="button" class="button button-quiet" onClick={() => void bridge.openSite("/privacy/")}>
           Privacy policy
