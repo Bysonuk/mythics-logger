@@ -5,3 +5,5 @@
 *.png binary
 *.ico binary
 *.icns binary
+# The installer's privacy and licence page: Windows' text box wants CRLF.
+src-tauri/installer/*.txt text eol=crlf

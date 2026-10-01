@@ -100,7 +100,7 @@ jobs:
           retention-days: 30
 
   release:
-    name: Draft release (unsigned)
+    name: Draft release
     needs: windows
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -118,13 +118,31 @@ jobs:
         working-directory: dist
         run: sha256sum -- *.exe > SHA256SUMS.txt && cat SHA256SUMS.txt
 
-      # A draft: a maintainer checks it, then publishes it by hand.
+      # A draft: a maintainer checks it, then publishes it by hand. Every
+      # release's notes end with the code signing policy (SignPath
+      # Foundation's terms ask for it on the download page).
       - name: Draft release
         env:
           GH_TOKEN: ${{ github.token }}
+          # The one switch for signing's wording: "true" once the SignPath
+          # Foundation has accepted the project and this workflow signs the
+          # installer. Until then the notes say the build is unsigned.
+          SIGNED: "false"
         run: |
-          gh release create "$GITHUB_REF_NAME" dist/*.exe dist/SHA256SUMS.txt \
-            --repo "$GITHUB_REPOSITORY" \
-            --draft \
-            --title "mythics.gg Logger $GITHUB_REF_NAME" \
-            --notes "Unsigned build from $GITHUB_SHA by this repository's Build workflow (run $GITHUB_RUN_ID). Windows SmartScreen warns before the first run until releases are signed. SHA-256 sums are in SHA256SUMS.txt."
+          policy="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY#code-signing-policy"
+          if [ "$SIGNED" = "true" ]; then
+            build="Signed build from $GITHUB_SHA by this repository's Build workflow (run $GITHUB_RUN_ID)."
+            signing="Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org)."
+          else
+            build="Unsigned build from $GITHUB_SHA by this repository's Build workflow (run $GITHUB_RUN_ID). Windows SmartScreen warns before the first run until releases are signed."
+            signing="This build is unsigned while the project's application to the SignPath Foundation is pending."
+          fi
+          {
+            echo "$build SHA-256 sums are in SHA256SUMS.txt."
+            echo
+            echo "### Code signing policy"
+            echo
+            echo "$signing See the [code signing policy]($policy), and [privacy]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY#privacy)."
+          } > notes.md
+          cat notes.md
+          gh release create "$GITHUB_REF_NAME" dist/*.exe dist/SHA256SUMS.txt             --repo "$GITHUB_REPOSITORY"             --draft             --title "mythics.gg Logger $GITHUB_REF_NAME"             --notes-file notes.md
