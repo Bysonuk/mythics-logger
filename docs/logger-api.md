@@ -416,3 +416,39 @@ A **log** is one combat log session: one WoW log file as the app read it, which 
 - **Signed in, no access:** the site's ordinary not-found page, the same as for an id that doesn't exist.
 - **Who has access** (the owner's rule for the preview): the uploader, to every upload of theirs; site staff, to any upload that isn't Private. Nobody else, Public uploads included, until the public pages read `logs.public_fights`.
 - Never indexed (`noindex`, and Caddy's `X-Robots-Tag`), no link preview, no sitemap entry. The account menu shows "Our logs (preview)" to staff and to anyone who has uploaded a log.
+
+## 12. The in-game addon
+
+The app keeps the mythics.gg addon up to date (mythics.gg #419): it reads which release is the latest from mythics.gg, and installs it when the game isn't running. The owner's choice: mythics.gg publishes the zip, not CurseForge's API, so the app needs no third-party key and talks to no other host. Server side: `mt10/addon/release.py` (mythics.gg #450); tests in `tests/test_addon_release.py`. Here: `core/src/addon.rs`. **Keep this stable**: fields may be added, never renamed, removed or given another meaning.
+
+### `GET https://mythics.gg/data/addon/latest.json`
+
+No sign-in. Served from the public bucket like the rest of `/data/`: GET and HEAD only, `Cache-Control: public, max-age=300` (so a new release reaches the app within about five minutes), and `404 {"error":"not found"}` when nothing is released.
+
+```json
+{
+  "version": "2.0.1",
+  "published": "2026-10-01T09:00:00Z",
+  "zip": "addon/Mythics-2.0.1-3f6c1d0a9b2e.zip",
+  "sha256": "3f6c1d0a9b2e…",
+  "size": 1268742,
+  "folders": ["Mythics", "Mythics_Data_EU", "Mythics_Data_EU_Heroic", "Mythics_Data_US", "Mythics_Data_US_Heroic", "Mythics_Data_MPlus_EU", "Mythics_Data_MPlus_US"],
+  "interface": "120100, 120105"
+}
+```
+
+| Field | What |
+|---|---|
+| `version` | The release's version, exactly as every `.toc` in the zip says it in `## Version:`. A plain counter, `major.minor.patch` (2.0.1, 2.0.2, ..., 2.1.1 after new code): compare the three numbers, not the strings. Read the installed one from `Interface/AddOns/Mythics/Mythics.toc` |
+| `published` | When it was released, ISO 8601 in UTC |
+| `zip` | The zip's address, relative to `https://mythics.gg/data/`. Always `addon/Mythics-<version>-<12 hex>.zip`; refuse anything else (a `..`, another host) |
+| `sha256` | The zip's SHA-256, lower-case hex. Check it, and `size`, before writing anything |
+| `size` | The zip's size in bytes |
+| `folders` | The zip's top-level folders, each a folder under `Interface/AddOns/`: `Mythics` first, then each data pack. The zip holds nothing else: no file at its top, no other folder |
+| `interface` | The `.toc`s' `## Interface:` line as it is, one or more six-digit numbers separated by a comma and a space (`120100, 120105`: 12.1.0 live and 12.1.5 on the PTR). Every `.toc` in the zip has the same one |
+
+**The zip** (`GET https://mythics.gg/data/<zip>`): never changed once published, so it's cached for a year (`public, max-age=31536000, immutable`); a new release is a new name. It's exactly what CurseForge gets: the daily CurseForge release uploads this zip, byte for byte, when it's newer than CurseForge's last. Only the release build is published here, never the admin test build (mythics.gg #410), and never a zip whose data packs hold the placeholder.
+
+**Installing.** Replace every folder in `folders` whole (delete it, then unpack it), so no file of an older version is left beside a newer one, and never touch any other folder or `WTF/` (the player's saved settings, `MythicsDB`). A folder in `folders` that isn't installed is installed: the data packs are all one release.
+
+**How fresh.** The server releases daily when the data or the addon changed (and at once after a character is removed on request, mythics.gg #131), so a release is at most about a day behind the site. An older zip stays downloadable for a day after a newer one replaces it, so a download that began before the switch finishes; after that its address is a 404, and the app reads `latest.json` again. If the latest is over a day old and the site's data has moved on, the server releases again; only if it can't is the latest taken down (its Mythic+ packs hold Blizzard data, which may be kept 30 days at most), and then `latest.json` is a 404 until the next release: the app keeps what's installed.
