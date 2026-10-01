@@ -624,3 +624,112 @@ async fn a_linked_folder_is_left_alone() {
     );
     assert!(!fake.addons().join("Mythics_Data_EU").exists());
 }
+
+/// A data pack folder as the site's build writes it (ours), or a look-alike.
+fn put_pack(fake: &Fake, name: &str, toc_text: &str) {
+    let dir = fake.addons().join(name);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join(format!("{name}.toc")), toc_text).unwrap();
+    std::fs::write(dir.join("Data.lua"), "-- data\n").unwrap();
+}
+
+/// The real pack `.toc`'s tags (the site's `addon/Mythics_Data_EU`).
+fn our_pack_toc(name: &str) -> String {
+    format!(
+        "## Interface: 120100, 120105\r\n## Title: mythics|cffb45cf5.gg|r data ({name})\r\n## Notes: The top 10 for the mythics.gg addon.\r\n## Author: mythics.gg\r\n## Version: 2.0.0\r\n## Dependencies: Mythics\r\n## LoadOnDemand: 1\r\n\r\nData.lua\r\n"
+    )
+}
+
+#[tokio::test]
+async fn our_own_data_pack_the_release_dropped_is_removed_and_look_alikes_kept() {
+    let fake = Fake::new();
+    fake.put("2.0.0", &FOLDERS);
+    put_pack(&fake, "Mythics_Data_KR", &our_pack_toc("KR"));
+    // Look-alikes: someone else's author, no dependency on ours, no .toc,
+    // and ours but not a data pack.
+    put_pack(
+        &fake,
+        "Mythics_Data_Fan",
+        "## Author: SomeoneElse\n## Dependencies: Mythics\n",
+    );
+    put_pack(&fake, "Mythics_Data_Solo", "## Author: mythics.gg\n");
+    std::fs::create_dir_all(fake.addons().join("Mythics_Data_Empty")).unwrap();
+    put_pack(&fake, "Mythics_Extra", &our_pack_toc("Extra"));
+    let kept: BTreeMap<_, _> = fake
+        .tree()
+        .into_iter()
+        .filter(|(p, _)| !p.to_string_lossy().contains("Mythics_Data_KR"))
+        .filter(|(p, _)| {
+            !FOLDERS
+                .iter()
+                .any(|f| p.starts_with(Path::new("Interface").join("AddOns").join(f)))
+        })
+        .collect();
+
+    let zip = release("2.1.0", &FOLDERS);
+    let stub = site(Some(latest_for(&zip, "2.1.0")), zip);
+    let i = addon::installed(&fake.game, &FOLDERS.map(String::from));
+    assert_eq!(i.stale, ["Mythics_Data_KR"]);
+    let o = run(&fake, &stub, Want::Auto, false).await.unwrap();
+    assert!(matches!(o, Outcome::Installed { .. }), "{o:?}");
+    assert!(
+        !fake.addons().join("Mythics_Data_KR").exists(),
+        "ours, dropped: removed"
+    );
+    assert_eq!(
+        fake.others(),
+        kept,
+        "look-alikes, other addons and WTF untouched"
+    );
+    fake.assert_clean();
+
+    // Up to date but with a dropped pack of ours: a repair removes it.
+    put_pack(&fake, "Mythics_Data_TW", &our_pack_toc("TW"));
+    let o = run(&fake, &stub, Want::Auto, false).await.unwrap();
+    assert!(
+        matches!(
+            o,
+            Outcome::Installed {
+                action: Action::Repair,
+                ..
+            }
+        ),
+        "{o:?}"
+    );
+    assert!(!fake.addons().join("Mythics_Data_TW").exists());
+    let o = run(&fake, &stub, Want::Auto, false).await.unwrap();
+    assert!(
+        matches!(
+            o,
+            Outcome::Checked {
+                action: Action::Nothing,
+                ..
+            }
+        ),
+        "{o:?}"
+    );
+}
+
+/// A file held open in the dropped pack stops its move: the new version
+/// is taken out again and every folder, the pack too, is back as it was.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_dropped_pack_in_use_rolls_everything_back() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let fake = Fake::new();
+    fake.put("2.0.0", &FOLDERS);
+    put_pack(&fake, "Mythics_Data_KR", &our_pack_toc("KR"));
+    let before = fake.tree();
+    let zip = release("2.1.0", &FOLDERS);
+    let stub = site(Some(latest_for(&zip, "2.1.0")), zip);
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(fake.addons().join("Mythics_Data_KR").join("Data.lua"))
+        .unwrap();
+    let r = run(&fake, &stub, Want::Auto, false).await;
+    assert_eq!(r, Err(AddonError::InUse));
+    drop(held);
+    assert_eq!(fake.tree(), before, "every folder back as it was");
+    fake.assert_clean();
+}
