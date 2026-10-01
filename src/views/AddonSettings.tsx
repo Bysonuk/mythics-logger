@@ -22,7 +22,7 @@ function latestText(a: AddonView): string {
 
 function installedText(a: AddonView): string {
   if (!a.present) return "Not installed";
-  if (a.action === "repair") return a.installed ? `${a.installed}, some files missing` : "Some files missing";
+  if (a.action === "repair") return a.installed ? `${a.installed}, needs a repair` : "Needs a repair";
   return a.installed ?? "Unknown version";
 }
 

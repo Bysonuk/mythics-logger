@@ -24,6 +24,11 @@
 //!   moved aside and the new one moved in (renames on one volume); on any
 //!   failure every move is undone, so versions never mix. The old folders
 //!   are deleted only once all are in place.
+//! - **Our old data packs go too.** A `Mythics_Data_…` folder that a
+//!   release no longer lists is moved aside in the same step (and put back
+//!   if anything fails), but only if its own `.toc` says it's ours:
+//!   `## Author: mythics.gg` and `## Dependencies: Mythics`, as every pack
+//!   the site's build makes does ([`is_our_old_pack`]).
 //! - **Nothing else.** Only folders named `Mythics` or `Mythics_…` (a
 //!   `latest.json` naming any other is refused), never another addon's
 //!   folder, never `WTF` (the player's saved settings), and never a folder
@@ -338,11 +343,12 @@ pub struct Installed {
     pub mixed: bool,
     /// One of the folders is a link (a developer's checkout).
     pub linked: bool,
+    /// Our own data packs the release no longer lists ([`stale_packs`]).
+    pub stale: Vec<String>,
 }
 
-/// `## Version:` from a `.toc`, if it has a sensible one. Reads at most the
-/// first 64 KB.
-pub fn toc_version(path: &Path) -> Option<String> {
+/// A `## Tag:` line's value from a `.toc`. Reads at most the first 64 KB.
+fn toc_tag(path: &Path, tag: &str) -> Option<String> {
     let mut buf = Vec::new();
     File::open(path)
         .ok()?
@@ -353,11 +359,54 @@ pub fn toc_version(path: &Path) -> Option<String> {
     text.lines().find_map(|line| {
         let line = line.trim_start_matches('\u{feff}').trim();
         let rest = line.strip_prefix("##")?.trim_start();
-        let (tag, value) = rest.split_once(':')?;
-        (tag.trim().eq_ignore_ascii_case("version"))
+        let (t, value) = rest.split_once(':')?;
+        t.trim()
+            .eq_ignore_ascii_case(tag)
             .then(|| value.trim().to_string())
-            .filter(|v| is_version(v) || v == UNBUILT_VERSION)
     })
+}
+
+/// `## Version:` from a `.toc`, if it has a sensible one.
+pub fn toc_version(path: &Path) -> Option<String> {
+    toc_tag(path, "Version").filter(|v| is_version(v) || v == UNBUILT_VERSION)
+}
+
+/// The author every `.toc` of ours carries (the site's `addon/`).
+pub const AUTHOR: &str = "mythics.gg";
+/// Data packs' folders start with this.
+pub const PACK_PREFIX: &str = "Mythics_Data_";
+
+/// Whether a folder in `AddOns` is one of our own data packs: named
+/// `Mythics_Data_…`, a real folder (not a link), and its own `.toc` says
+/// `## Author: mythics.gg` and `## Dependencies: Mythics`, as every pack the
+/// site's build makes does. A look-alike from anyone else fails one of those.
+pub fn is_our_old_pack(addons: &Path, name: &str) -> bool {
+    if !(name.starts_with(PACK_PREFIX) && is_our_folder(name)) {
+        return false;
+    }
+    let dir = addons.join(name);
+    let real_dir =
+        fs::symlink_metadata(&dir).is_ok_and(|m| m.is_dir() && !m.file_type().is_symlink());
+    let toc = dir.join(format!("{name}.toc"));
+    real_dir
+        && toc_tag(&toc, "Author").as_deref() == Some(AUTHOR)
+        && toc_tag(&toc, "Dependencies").as_deref() == Some(CORE)
+}
+
+/// Our own data packs in `AddOns` that `folders` (a release's) doesn't list:
+/// the ones a new release dropped. Sorted, for a steady order.
+pub fn stale_packs(addons: &Path, folders: &[String]) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(addons) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = entries
+        .flatten()
+        .filter_map(|e| e.file_name().to_str().map(str::to_string))
+        .filter(|n| !folders.iter().any(|f| f.eq_ignore_ascii_case(n)))
+        .filter(|n| is_our_old_pack(addons, n))
+        .collect();
+    out.sort();
+    out
 }
 
 /// Reads the installed addon: the core's version, and which of `folders`
@@ -386,6 +435,11 @@ pub fn installed(game: &Game, folders: &[String]) -> Installed {
         }
     }
     out.mixed = out.version.is_some() && pack_versions.iter().any(|v| *v != out.version);
+    // Only against a release's list: with just the core's (no latest.json
+    // yet) every pack would look dropped.
+    if folders.len() > 1 {
+        out.stale = stale_packs(&addons, folders);
+    }
     out
 }
 
@@ -425,7 +479,7 @@ pub fn action(i: &Installed, latest: &Latest) -> Action {
         return Action::Unbuilt;
     }
     if v == latest.version {
-        return if i.missing.is_empty() && !i.mixed {
+        return if i.missing.is_empty() && !i.mixed && i.stale.is_empty() {
             Action::Nothing
         } else {
             Action::Repair
@@ -794,6 +848,10 @@ fn install_from(
         }
     }
 
+    // Our own packs the release dropped: moved aside in the same step, so
+    // a failure puts them back with everything else, and deleted with the
+    // old folders.
+    let stale = stale_packs(addons, &latest.folders);
     let mut done: Vec<Moved> = Vec::new();
     let r = (|| -> Result<(), AddonError> {
         for f in &latest.folders {
@@ -805,8 +863,18 @@ fn install_from(
             fs::rename(new.join(f), &dst)?;
             done.push(Moved::Placed(f.clone()));
         }
+        for f in &stale {
+            fs::rename(addons.join(f), old.join(f))?;
+            done.push(Moved::Aside(f.clone()));
+        }
         Ok(())
     })();
+    if r.is_ok() && !stale.is_empty() {
+        log::info!(
+            "removed {} data packs the release no longer has",
+            stale.len()
+        );
+    }
     if let Err(e) = r {
         log::warn!("couldn't put the addon in place: {}; undoing", e.code());
         for m in done.iter().rev() {

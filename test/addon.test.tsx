@@ -137,7 +137,7 @@ describe("Settings > In-game addon", () => {
     expect(bridge.calls).toContainEqual(["addonInstall"]);
 
     bridge = await mount(withAddon({ action: "repair" }), "settings");
-    expect(card().textContent).toContain("2.1.0, some files missing");
+    expect(card().textContent).toContain("2.1.0, needs a repair");
     expect(hasButton("Repair")).toBe(true);
 
     bridge = await mount(withAddon({ present: false, installed: null, action: "install" }, false), "settings");
