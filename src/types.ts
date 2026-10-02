@@ -213,6 +213,21 @@ export interface AppUpdateView {
   checked_ms: number | null;
 }
 
+/** The live report's link (src-tauri's `share.rs`): a page of the log being
+ *  written that anyone with the link can open. */
+export interface LiveShareView {
+  /** "off": not live logging. "waiting": no pull uploaded yet.
+   *  "not_public": the log's pulls go Guild only or Private. "unavailable":
+   *  mythics.gg doesn't have share links yet. */
+  status: "off" | "waiting" | "not_public" | "creating" | "ready" | "revoked" | "unavailable" | "error";
+  /** The link, when ready. */
+  url: string | null;
+  /** Why there's no link (with "not_public"). */
+  visibility: Visibility | null;
+  /** The last attempt's error code (`errorText`). */
+  error: string | null;
+}
+
 export interface BacklogView {
   scanning: boolean;
   files_done: number;
@@ -251,6 +266,7 @@ export interface Snapshot {
   archive: ArchiveView;
   addon: AddonView;
   app_update: AppUpdateView;
+  live_share: LiveShareView;
 }
 
 export interface HistoryRow extends LogPlace {

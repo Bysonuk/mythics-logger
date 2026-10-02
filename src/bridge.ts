@@ -42,6 +42,12 @@ export interface Bridge {
   appUpdateLater(): Promise<void>;
   /** Downloads, checks and installs the new version; the app restarts. */
   appUpdateInstall(): Promise<void>;
+  /** "Make a new link" for the live report: the old one stops working. */
+  liveShareNew(): Promise<void>;
+  /** "Stop sharing": the live report's link stops working at once. */
+  liveShareRevoke(): Promise<void>;
+  /** Opens the live report's link in the browser. */
+  liveShareOpen(): Promise<void>;
 }
 
 /** The real bridge, over Tauri's IPC. Loaded lazily so tests never import it. */
@@ -87,5 +93,8 @@ export async function tauriBridge(): Promise<Bridge> {
     appUpdateCheck: () => invoke("app_update_check"),
     appUpdateLater: () => invoke("app_update_later"),
     appUpdateInstall: () => invoke("app_update_install"),
+    liveShareNew: () => invoke("live_share_new"),
+    liveShareRevoke: () => invoke("live_share_revoke"),
+    liveShareOpen: () => invoke("live_share_open"),
   };
 }

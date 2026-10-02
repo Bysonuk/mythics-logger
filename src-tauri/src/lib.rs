@@ -9,6 +9,7 @@ mod app_update;
 mod commands;
 mod links;
 mod settings;
+mod share;
 mod state;
 mod token;
 mod workers;
@@ -127,6 +128,8 @@ pub fn run() {
                 app_update: Mutex::new(Default::default()),
                 app_update_wake: tokio::sync::Notify::new(),
                 addon_wake: tokio::sync::Notify::new(),
+                share: Mutex::new(Default::default()),
+                share_wake: tokio::sync::Notify::new(),
                 config_dir,
                 data_dir,
             });
@@ -196,6 +199,8 @@ pub fn run() {
             tauri::async_runtime::spawn(addon::addon_forever(h, s));
             let (h, s) = (app.handle().clone(), state.clone());
             tauri::async_runtime::spawn(app_update::app_update_forever(h, s));
+            let (h, s) = (app.handle().clone(), state.clone());
+            tauri::async_runtime::spawn(share::share_forever(h, s));
             let (h, s) = (app.handle().clone(), state);
             std::thread::Builder::new()
                 .name("archive".into())
@@ -236,6 +241,9 @@ pub fn run() {
             app_update::app_update_check,
             app_update::app_update_later,
             app_update::app_update_install,
+            share::live_share_new,
+            share::live_share_revoke,
+            share::live_share_open,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the mythics.gg Logger");

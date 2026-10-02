@@ -399,6 +399,19 @@ input[type="url"] {
   min-width: 20rem;
 }
 
+/* The live report's link: the whole address, read-only, selected on focus. */
+.live-report .field {
+  justify-items: stretch;
+}
+
+input.share-link {
+  width: 100%;
+  min-width: 0;
+  max-width: 40rem;
+  font-family: var(--font-mono);
+  font-size: var(--fs-data);
+}
+
 input[type="checkbox"],
 input[type="radio"] {
   width: 18px;

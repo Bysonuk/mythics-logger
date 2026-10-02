@@ -39,6 +39,18 @@ async function bridge(): Promise<Bridge> {
         offer: true,
       };
     }
+    // ?share=ready (or not_public, revoked, unavailable, error): the live
+    // report link in that state; without it, waiting for the first pull.
+    const share = q.get("share");
+    if (share === "ready") {
+      snap.live_share = { ...snap.live_share, status: "ready", url: "https://mythics.gg/shared/AbCdEfGhIjKlMnOpQr_-12/" };
+    } else if (share === "not_public") {
+      snap.live_share = { ...snap.live_share, status: "not_public", visibility: "guild" };
+    } else if (share === "revoked" || share === "unavailable") {
+      snap.live_share = { ...snap.live_share, status: share };
+    } else if (share === "error") {
+      snap.live_share = { ...snap.live_share, status: "error", error: "offline" };
+    }
     return fakeBridge(snap);
   }
   return tauriBridge();
