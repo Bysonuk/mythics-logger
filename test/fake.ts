@@ -200,6 +200,7 @@ export function snapshot(over: Partial<Snapshot> = {}): Snapshot {
       checked_ms: Date.now() - 4 * 3_600_000,
     },
     app_update: { available: null, offer: false, status: "idle", progress_pct: null, error: null, checked_ms: null },
+    live_share: { status: "waiting", url: null, visibility: null, error: null },
     counts: { live_waiting: 1, backlog_waiting: 624, backlog_done: 412, backlog_total: 1036, failed: 0, done: 413 },
     ...over,
   };
@@ -255,5 +256,8 @@ export function fakeBridge(
     appUpdateCheck: rec("appUpdateCheck", undefined),
     appUpdateLater: rec("appUpdateLater", undefined),
     appUpdateInstall: rec("appUpdateInstall", undefined),
+    liveShareNew: rec("liveShareNew", undefined),
+    liveShareRevoke: rec("liveShareRevoke", undefined),
+    liveShareOpen: rec("liveShareOpen", undefined),
   };
 }

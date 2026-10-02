@@ -46,6 +46,9 @@ pub struct AppState {
     /// The app's own updates (`app_update.rs`).
     pub app_update: Mutex<crate::app_update::AppUpdateState>,
     pub app_update_wake: tokio::sync::Notify,
+    /// The live report's link (`share.rs`), and the nudge for its job.
+    pub share: Mutex<crate::share::ShareState>,
+    pub share_wake: tokio::sync::Notify,
 }
 
 /// Archiving finished logs (`mythics_logger_core::archive`).
@@ -610,6 +613,7 @@ pub struct Snapshot {
     pub archive: ArchiveView,
     pub addon: crate::addon::AddonView,
     pub app_update: crate::app_update::AppUpdateView,
+    pub live_share: crate::share::ShareView,
 }
 
 pub fn snapshot(s: &AppState) -> Snapshot {
@@ -635,6 +639,12 @@ pub fn snapshot(s: &AppState) -> Snapshot {
             .map(|(p, _, _)| p),
         _ => None,
     };
+    let share_target = crate::share::target(
+        &live,
+        settings.live_logging,
+        q.items(),
+        &s.server_uploads.lock().expect("server uploads"),
+    );
     let skips = s.skips.lock().expect("skips");
     let backlog = backlog_view(
         &b,
@@ -674,6 +684,7 @@ pub fn snapshot(s: &AppState) -> Snapshot {
         archive,
         addon: crate::addon::view(&s.addon.lock().expect("addon")),
         app_update: crate::app_update::view(&s.app_update.lock().expect("app update")),
+        live_share: crate::share::snapshot_view(s, share_target.as_ref()),
         live,
         settings,
     }

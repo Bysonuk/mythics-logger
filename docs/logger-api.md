@@ -326,6 +326,12 @@ Paths only, never an origin: the app keeps the site's origin (`https://mythics.g
 
 `PATCH /api/logger/uploads/{id}` `{"visibility": "private"}`. `200` with the upload. Takes effect at once, for every reader.
 
+### Share a log by link (#615)
+
+`POST /api/logger/sessions/{session_id}/share`. `201` with `{"id", "token", "path", "createdAt"}`: `path` is the page, `/shared/<token>/`, which anyone can open without signing in, and which updates as the session's pulls arrive. The token is 22 URL-safe characters (128 random bits), stored only as its hash: this answer is the only time it's shown, so the app keeps or shows it then. Asking again makes a new link and the old one stops working. A link shows the session's Public uploads only; `409 log_not_public` when the session has none. Another account's session is `404`.
+
+`DELETE /api/logger/sessions/{session_id}/share`. `204`; the link stops working at once. `404` when the session has no link. Both are in the site's audit log. The page says "Live" while an upload is still arriving or being read, or the newest Public one is under 15 minutes old.
+
 ### Delete
 
 `DELETE /api/logger/uploads/{id}`. `204`. The uploader can delete any of their logs at any time (the owner's decision): the raw segment and chunks, and everything parsed from it, go at once. If the bucket can't be reached, the row still goes and the daily retention job deletes the objects.

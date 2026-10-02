@@ -22,7 +22,7 @@ use tauri_plugin_opener::OpenerExt as _;
 
 type St<'a> = State<'a, Arc<AppState>>;
 
-fn api_code(e: &ApiError) -> String {
+pub(crate) fn api_code(e: &ApiError) -> String {
     match e {
         ApiError::Offline => "offline".into(),
         ApiError::Unauthorized => "signed_out".into(),
@@ -112,6 +112,9 @@ pub async fn log_out(app: AppHandle, state: St<'_>) -> Result<(), String> {
     crate::token::clear();
     *state.token.lock().expect("token") = None;
     state.server_uploads.lock().expect("server uploads").clear();
+    // The live report's link is that account's: the app forgets it (it
+    // keeps working on the site until stopped there, under My logs).
+    crate::share::forget(&state);
     {
         let mut s = state.settings.lock().expect("settings");
         s.main = None;
@@ -179,6 +182,7 @@ pub fn save_settings(
                 *state.token.lock().expect("token") = None;
                 // Nor its upload ids.
                 state.server_uploads.lock().expect("server uploads").clear();
+                crate::share::forget(&state);
                 next.main = None;
             }
             next.site_origin = o;

@@ -651,6 +651,103 @@ impl Api {
     }
 }
 
+/// A log's share link (`POST /api/logger/sessions/{id}/share`): the page
+/// anyone with it can open, `/shared/<token>/`. The server keeps only the
+/// token's hash, so this answer is the only time it's given. Never logged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ShareLink {
+    pub token: String,
+    pub path: String,
+    #[serde(default, rename = "createdAt")]
+    pub created_at: Option<String>,
+}
+
+/// A share link's token as the server makes it: 22 URL-safe characters
+/// (128 random bits). Nothing else goes into a path or an address.
+pub fn is_share_token(s: &str) -> bool {
+    s.len() == 22
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// The share page's path for a token, `/shared/<token>/`.
+pub fn share_path(token: &str) -> Option<String> {
+    is_share_token(token).then(|| format!("/shared/{token}/"))
+}
+
+impl Api {
+    /// Makes a share link for one of the account's logs (a session),
+    /// replacing any it had: the old one stops working. `409
+    /// log_not_public` when the log has no Public upload.
+    pub async fn create_share(&self, session_id: &str) -> Result<ShareLink, ApiError> {
+        if !is_id(session_id) {
+            return Err(ApiError::BadReply);
+        }
+        let resp = self
+            .send(
+                self.http
+                    .post(self.url(&format!("/api/logger/sessions/{session_id}/share"))),
+            )
+            .await?;
+        let link: ShareLink = resp.json().await.map_err(|_| ApiError::BadReply)?;
+        // The page is the server's; but only its one shape is kept.
+        match share_path(&link.token) {
+            Some(p) if p == link.path => Ok(link),
+            _ => Err(ApiError::BadReply),
+        }
+    }
+
+    /// Revokes the log's share link: it stops working at once. `404
+    /// share_not_found` when the log has none.
+    pub async fn revoke_share(&self, session_id: &str) -> Result<(), ApiError> {
+        if !is_id(session_id) {
+            return Err(ApiError::BadReply);
+        }
+        self.send(
+            self.http
+                .delete(self.url(&format!("/api/logger/sessions/{session_id}/share"))),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Whether a share link still opens its log: `false` once it was
+    /// revoked (here or on the site), or the log has no Public upload left
+    /// (`404 share_not_found`). Reads the shared log with no sign-in, as
+    /// anyone with the link would.
+    pub async fn share_works(&self, token: &str) -> Result<bool, ApiError> {
+        if !is_share_token(token) {
+            return Err(ApiError::BadReply);
+        }
+        let rb = self.http.get(self.url(&format!("/api/shared/{token}")));
+        // Not `send`: the link is read as a stranger would, with no token.
+        let resp = rb.send().await.map_err(|e| {
+            log::info!("request failed: {}", describe(&e));
+            ApiError::Offline
+        })?;
+        match resp.status().as_u16() {
+            200..=299 => Ok(true),
+            404 => {
+                let code = resp
+                    .json::<serde_json::Value>()
+                    .await
+                    .ok()
+                    .and_then(|v| v.get("code").and_then(|c| c.as_str().map(str::to_string)));
+                if code.as_deref() == Some("share_not_found") {
+                    Ok(false)
+                } else {
+                    Err(ApiError::Refused { status: 404, code })
+                }
+            }
+            status @ (429 | 500..=599) => Err(ApiError::Busy {
+                status,
+                retry_after_s: None,
+            }),
+            status => Err(ApiError::Refused { status, code: None }),
+        }
+    }
+}
+
 /// A server id as the API gives it: digits only, and short enough for a
 /// 64-bit number. Nothing else is put in a request's path.
 fn is_id(s: &str) -> bool {
@@ -824,6 +921,62 @@ mod tests {
         ));
         assert!(matches!(
             api.delete_upload("41").await,
+            Err(ApiError::Offline)
+        ));
+    }
+
+    #[test]
+    fn share_tokens_and_paths_have_one_shape() {
+        let t = "AbCdEfGhIjKlMnOpQr_-12";
+        assert!(is_share_token(t));
+        assert_eq!(
+            share_path(t).as_deref(),
+            Some("/shared/AbCdEfGhIjKlMnOpQr_-12/")
+        );
+        for bad in [
+            "",
+            "short",
+            "AbCdEfGhIjKlMnOpQr_-123",
+            "AbCdEfGhIjKlMnOpQr/-12",
+            "AbCdEfGhIjKlMnOpQr.-12",
+            "../../../account/logs/",
+        ] {
+            assert!(!is_share_token(bad), "{bad:?}");
+            assert_eq!(share_path(bad), None);
+        }
+        let link: ShareLink = serde_json::from_value(serde_json::json!({
+            "id": 3, "token": t, "path": "/shared/AbCdEfGhIjKlMnOpQr_-12/",
+            "createdAt": "2026-10-02T20:10:00+00:00"
+        }))
+        .unwrap();
+        assert_eq!(
+            link.created_at.as_deref(),
+            Some("2026-10-02T20:10:00+00:00")
+        );
+    }
+
+    #[tokio::test]
+    async fn only_a_numeric_log_id_goes_in_a_share_path() {
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", dead.local_addr().unwrap());
+        drop(dead);
+        let api = Api::new(&origin).with_token(Some("t".into()));
+        for bad in ["", "../uploads", "12/share", "12?x"] {
+            assert!(matches!(
+                api.create_share(bad).await,
+                Err(ApiError::BadReply)
+            ));
+            assert!(matches!(
+                api.revoke_share(bad).await,
+                Err(ApiError::BadReply)
+            ));
+        }
+        assert!(matches!(
+            api.share_works("../x").await,
+            Err(ApiError::BadReply)
+        ));
+        assert!(matches!(
+            api.create_share("12").await,
             Err(ApiError::Offline)
         ));
     }

@@ -246,6 +246,13 @@ export function errorText(code: string): string {
       return "Another program has a file of the addon open, so it was left as it was. Close it, then try again.";
     case "addon_io":
       return "The app couldn't write the addon, so it was left as it was. Try again.";
+    case "log_not_public":
+      return "A live report shows Public pulls only, and this log has none. Make a pull Public in History, then try again.";
+    case "share_unavailable":
+      return "Live report links aren't available from mythics.gg yet.";
+    case "no_log":
+    case "no_link":
+      return "There's no live report for this log yet. It appears once a pull uploads.";
     default:
       return "Something went wrong. Try again in a moment.";
   }
