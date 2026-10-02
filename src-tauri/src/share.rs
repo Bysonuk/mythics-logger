@@ -16,13 +16,19 @@
 //!   (every 10 minutes while it's shown).
 //! - A site without share links (a 404 with no code) hides the feature,
 //!   with a note, until the app next starts.
+//! - Logging out, or changing the site address, stops the link on the site
+//!   too (the owner's decision), before the app token goes. If that fails,
+//!   the player is still logged out and told to stop it under Your logs,
+//!   and the log's id (never the token) is noted in
+//!   `live-share-to-stop.json` for the next sign-in to that site to stop.
 
 use crate::state::{AppState, LiveStatus};
 use crate::workers::changed;
-use mythics_logger_core::api::{share_path, ApiError, ShareLink, UploadRow, Visibility};
+use mythics_logger_core::api::{share_path, Api, ApiError, ShareLink, UploadRow, Visibility};
 use mythics_logger_core::queue::{Item, Origin, State};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tauri::AppHandle;
@@ -376,7 +382,122 @@ pub async fn share_forever(app: AppHandle, state: Arc<AppState>) {
     }
 }
 
-/// Logging out, or another site: the link belongs to that account and site.
+/// A link the app couldn't stop when logging out (offline, say): the log's
+/// id and the site it's on, never the token. The next sign-in to that site
+/// stops it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Pending {
+    pub session_id: String,
+    pub origin: String,
+}
+
+/// The links still to stop, in the app's data folder: not secret (no
+/// token), and only there until a sign-in stops them.
+pub fn pending_path(state: &AppState) -> PathBuf {
+    state.data_dir.join("live-share-to-stop.json")
+}
+
+fn load_pending(path: &Path) -> Vec<Pending> {
+    std::fs::read(path)
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn save_pending(path: &Path, list: &[Pending]) {
+    let r = if list.is_empty() {
+        match std::fs::remove_file(path) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+            _ => Ok(()),
+        }
+    } else {
+        serde_json::to_vec(list)
+            .map_err(std::io::Error::other)
+            .and_then(|b| std::fs::write(path, b))
+    };
+    if r.is_err() {
+        log::warn!("couldn't save the live report links still to stop");
+    }
+}
+
+/// Stops a log's link on the site: `true` once it no longer works, or there
+/// was nothing to stop. `share_not_found` is a link already stopped;
+/// `log_not_found` a log that's gone or another account's; a 404 with no
+/// code a site that never had links.
+pub async fn stop_link(api: &Api, session_id: &str) -> bool {
+    match api.revoke_share(session_id).await {
+        Ok(()) => true,
+        Err(ApiError::Refused { status: 404, code }) => matches!(
+            code.as_deref(),
+            None | Some("share_not_found" | "log_not_found")
+        ),
+        Err(_) => false,
+    }
+}
+
+/// Logging out, or moving to another site: stops the current log's link on
+/// mythics.gg (the owner's decision), with the app token still in hand. If
+/// that fails, notes the log to stop at the next sign-in. `false` then: the
+/// player is told to stop it on the site.
+pub async fn stop_and_note(api: &Api, stored: Option<&Stored>, pending: &Path) -> bool {
+    let Some(Stored {
+        session_id,
+        token: Some(_),
+    }) = stored
+    else {
+        return true;
+    };
+    if api.has_token() && stop_link(api, session_id).await {
+        log::info!("stopped the live report link");
+        return true;
+    }
+    let mut list = load_pending(pending);
+    let note = Pending {
+        session_id: session_id.clone(),
+        origin: api.origin().to_string(),
+    };
+    if !list.contains(&note) {
+        list.push(note);
+    }
+    save_pending(pending, &list);
+    log::info!("couldn't stop the live report link; the next sign-in tries again");
+    false
+}
+
+/// After a sign-in: stops the links a logging out couldn't, on this site.
+/// One that still fails stays for the next sign-in.
+pub async fn stop_pending(api: &Api, pending: &Path) {
+    let list = load_pending(pending);
+    if list.is_empty() {
+        return;
+    }
+    let mut keep = Vec::new();
+    for p in list {
+        if p.origin != api.origin() || !stop_link(api, &p.session_id).await {
+            keep.push(p);
+        }
+    }
+    save_pending(pending, &keep);
+}
+
+/// Before the app token goes (Log out, another site address): stops the
+/// link, then forgets it. `share_stop_failed` when it couldn't be stopped.
+pub async fn stop_before_forgetting(state: &AppState) -> Result<(), String> {
+    let stored = {
+        let mut s = state.share.lock().expect("share");
+        s.ensure_loaded();
+        s.stored.clone()
+    };
+    let stopped = stop_and_note(&state.api(), stored.as_ref(), &pending_path(state)).await;
+    forget(state);
+    if stopped {
+        Ok(())
+    } else {
+        Err("share_stop_failed".into())
+    }
+}
+
+/// Forgets the link: it belongs to that account and site.
 pub fn forget(state: &AppState) {
     clear();
     let mut s = state.share.lock().expect("share");
@@ -687,5 +808,171 @@ mod tests {
         assert_eq!(raw, format!(r#"{{"session_id":"12","token":"{TOKEN}"}}"#));
         // Well under Windows Credential Manager's 2,560-byte limit.
         assert!(raw.len() < 200);
+    }
+
+    /// A one-thread HTTP stub on 127.0.0.1 answering every request with the
+    /// status (and body) set in `reply`; it records each request's line and
+    /// whether it carried the app token.
+    struct Stub {
+        origin: String,
+        reply: Arc<std::sync::Mutex<(u16, &'static str)>>,
+        seen: Arc<std::sync::Mutex<Vec<(String, bool)>>>,
+    }
+
+    fn stub(status: u16, body: &'static str) -> Stub {
+        use std::io::{BufRead, BufReader, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let reply = Arc::new(std::sync::Mutex::new((status, body)));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let (r, s) = (reply.clone(), seen.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut reader = BufReader::new(stream.try_clone().unwrap());
+                let mut first = String::new();
+                let _ = reader.read_line(&mut first);
+                let mut authed = false;
+                loop {
+                    let mut h = String::new();
+                    if reader.read_line(&mut h).unwrap_or(0) == 0 || h.trim().is_empty() {
+                        break;
+                    }
+                    authed |= h
+                        .to_ascii_lowercase()
+                        .starts_with("authorization: bearer app-token");
+                }
+                s.lock().unwrap().push((first.trim().to_string(), authed));
+                let (status, body) = *r.lock().unwrap();
+                let _ = write!(
+                    stream,
+                    "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+            }
+        });
+        Stub {
+            origin,
+            reply,
+            seen,
+        }
+    }
+
+    fn signed_in(stub: &Stub) -> Api {
+        Api::new(&stub.origin).with_token(Some("app-token".into()))
+    }
+
+    fn link() -> Stored {
+        Stored {
+            session_id: "12".into(),
+            token: Some(TOKEN.into()),
+        }
+    }
+
+    const DELETE: &str = "DELETE /api/logger/sessions/12/share HTTP/1.1";
+
+    #[test]
+    fn logging_out_stops_the_link_with_the_app_token() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pending = tmp.path().join("live-share-to-stop.json");
+        let s = stub(204, "");
+        let stopped =
+            tauri::async_runtime::block_on(stop_and_note(&signed_in(&s), Some(&link()), &pending));
+        assert!(stopped);
+        assert_eq!(*s.seen.lock().unwrap(), [(DELETE.to_string(), true)]);
+        assert!(!pending.exists());
+        // Already stopped (or no link ever made): nothing is sent.
+        let none = Stored {
+            session_id: "12".into(),
+            token: None,
+        };
+        for stored in [Some(&none), None] {
+            assert!(tauri::async_runtime::block_on(stop_and_note(
+                &signed_in(&s),
+                stored,
+                &pending
+            )));
+        }
+        assert_eq!(s.seen.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_link_already_stopped_on_the_site_counts_as_stopped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pending = tmp.path().join("live-share-to-stop.json");
+        let s = stub(
+            404,
+            r#"{"detail": "This log has no link.", "code": "share_not_found"}"#,
+        );
+        assert!(tauri::async_runtime::block_on(stop_and_note(
+            &signed_in(&s),
+            Some(&link()),
+            &pending
+        )));
+        assert!(!pending.exists());
+    }
+
+    #[test]
+    fn a_failed_stop_still_logs_out_and_the_next_sign_in_tries_again() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pending = tmp.path().join("live-share-to-stop.json");
+        let s = stub(503, "{}");
+        let stopped =
+            tauri::async_runtime::block_on(stop_and_note(&signed_in(&s), Some(&link()), &pending));
+        // The window says "Couldn't stop your live report link…".
+        assert!(!stopped);
+        // Noted for the next sign-in: the log and the site, never the token.
+        let raw = std::fs::read_to_string(&pending).unwrap();
+        assert!(!raw.contains(TOKEN));
+        assert_eq!(
+            load_pending(&pending),
+            [Pending {
+                session_id: "12".into(),
+                origin: s.origin.clone(),
+            }]
+        );
+        // Another site's note waits for a sign-in to that site.
+        let mut list = load_pending(&pending);
+        list.push(Pending {
+            session_id: "7".into(),
+            origin: "https://mythics.gg".into(),
+        });
+        save_pending(&pending, &list);
+
+        // The next sign-in, still failing: kept.
+        tauri::async_runtime::block_on(stop_pending(&signed_in(&s), &pending));
+        assert_eq!(load_pending(&pending).len(), 2);
+        // Then it works: this site's note goes; the other site's stays.
+        *s.reply.lock().unwrap() = (204, "");
+        tauri::async_runtime::block_on(stop_pending(&signed_in(&s), &pending));
+        assert_eq!(
+            load_pending(&pending),
+            [Pending {
+                session_id: "7".into(),
+                origin: "https://mythics.gg".into(),
+            }]
+        );
+        let seen = s.seen.lock().unwrap();
+        assert_eq!(seen.len(), 3);
+        assert!(seen.iter().all(|(line, authed)| line == DELETE && *authed));
+    }
+
+    #[test]
+    fn offline_counts_as_not_stopped() {
+        let tmp = tempfile::tempdir().unwrap();
+        let pending = tmp.path().join("live-share-to-stop.json");
+        let dead = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", dead.local_addr().unwrap());
+        drop(dead);
+        let api = Api::new(&origin).with_token(Some("app-token".into()));
+        assert!(!tauri::async_runtime::block_on(stop_and_note(
+            &api,
+            Some(&link()),
+            &pending
+        )));
+        assert_eq!(load_pending(&pending)[0].session_id, "12");
+        // Stopped at last: the note's file goes.
+        save_pending(&pending, &[]);
+        assert!(!pending.exists());
     }
 }

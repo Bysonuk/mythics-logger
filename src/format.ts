@@ -248,6 +248,8 @@ export function errorText(code: string): string {
       return "The app couldn't write the addon, so it was left as it was. Try again.";
     case "log_not_public":
       return "A live report shows Public pulls only, and this log has none. Make a pull Public in History, then try again.";
+    case "share_stop_failed":
+      return "Couldn't stop your live report link. Stop it on mythics.gg under Your logs.";
     case "share_unavailable":
       return "Live report links aren't available from mythics.gg yet.";
     case "no_log":

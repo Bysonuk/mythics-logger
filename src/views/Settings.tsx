@@ -51,7 +51,7 @@ export function Settings({
         <p>
           <Account main={snap.main} />
         </p>
-        <button type="button" class="button" onClick={() => void bridge.logOut()}>
+        <button type="button" class="button" onClick={() => void bridge.logOut().catch((e: unknown) => onError(String(e)))}>
           Log out
         </button>
       </Card>

@@ -52,6 +52,8 @@ pub async fn log_in(app: AppHandle, state: St<'_>) -> Result<(), String> {
     if result.is_ok() {
         state.signed_out_notice.store(false, Ordering::SeqCst);
         state.wake.notify_one();
+        // Live report links a logging out couldn't stop, on this site.
+        crate::share::stop_pending(&state.api(), &crate::share::pending_path(&state)).await;
     }
     changed(&app);
     result
@@ -104,6 +106,10 @@ pub fn cancel_log_in(state: St<'_>) {
 
 #[tauri::command]
 pub async fn log_out(app: AppHandle, state: St<'_>) -> Result<(), String> {
+    // The live report's link stops too (the owner's decision), while the
+    // app token can still stop it. If it can't, the player is still logged
+    // out, and told to stop it on the site; the next sign-in tries again.
+    let link = crate::share::stop_before_forgetting(&state).await;
     let api = state.api();
     if api.has_token() {
         // Best effort: the token is forgotten here either way.
@@ -112,9 +118,6 @@ pub async fn log_out(app: AppHandle, state: St<'_>) -> Result<(), String> {
     crate::token::clear();
     *state.token.lock().expect("token") = None;
     state.server_uploads.lock().expect("server uploads").clear();
-    // The live report's link is that account's: the app forgets it (it
-    // keeps working on the site until stopped there, under My logs).
-    crate::share::forget(&state);
     {
         let mut s = state.settings.lock().expect("settings");
         s.main = None;
@@ -122,7 +125,7 @@ pub async fn log_out(app: AppHandle, state: St<'_>) -> Result<(), String> {
     }
     log::info!("logged out");
     changed(&app);
-    Ok(())
+    link
 }
 
 /// Only the fields the window sends are changed.
@@ -163,11 +166,25 @@ pub fn toggle_live(app: &AppHandle, state: &AppState) {
 }
 
 #[tauri::command]
-pub fn save_settings(
+pub async fn save_settings(
     app: AppHandle,
     state: St<'_>,
     patch: SettingsPatch,
 ) -> Result<Snapshot, String> {
+    // Another site: the live report's link stops first, as when logging
+    // out, while this site's token can still stop it.
+    let moving = match &patch.site_origin {
+        Some(o) => {
+            let o = valid_origin(o).ok_or("origin")?;
+            o != state.settings.lock().expect("settings").site_origin
+        }
+        None => false,
+    };
+    let link = if moving {
+        crate::share::stop_before_forgetting(&state).await
+    } else {
+        Ok(())
+    };
     {
         let mut s = state.settings.lock().expect("settings");
         let mut next: Settings = s.clone();
@@ -182,7 +199,6 @@ pub fn save_settings(
                 *state.token.lock().expect("token") = None;
                 // Nor its upload ids.
                 state.server_uploads.lock().expect("server uploads").clear();
-                crate::share::forget(&state);
                 next.main = None;
             }
             next.site_origin = o;
@@ -253,6 +269,8 @@ pub fn save_settings(
     // The tail thread reads the setting every second; the tray says it now.
     crate::update_tray(&app);
     changed(&app);
+    // Saved either way; the player is told if the link couldn't be stopped.
+    link?;
     Ok(snapshot(&state))
 }
 

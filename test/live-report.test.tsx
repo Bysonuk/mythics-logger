@@ -134,6 +134,49 @@ describe("the live report link", () => {
     expect(card()?.querySelectorAll("button").length).toBe(0);
   });
 
+  it("logging out stops the link; when it can't, says to stop it on mythics.gg", async () => {
+    const snap = withShare({ status: "ready", url: URL });
+    const bridge = fakeBridge(snap);
+    // The app logged out, but couldn't reach mythics.gg to stop the link.
+    bridge.logOut = (...args: unknown[]) => {
+      bridge.calls.push(["logOut", ...args]);
+      return Promise.reject("share_stop_failed");
+    };
+    host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      render(<App bridge={bridge} initialTab="settings" />, host);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    await click(button("Log out"));
+    expect(bridge.calls).toContainEqual(["logOut"]);
+    expect(text()).toContain("Couldn't stop your live report link. Stop it on mythics.gg under Your logs.");
+  });
+
+  it("moving to another site address says the same when the link couldn't be stopped", async () => {
+    const bridge = fakeBridge(withShare({ status: "ready", url: URL }, { dev: true }));
+    bridge.saveSettings = () => Promise.reject("share_stop_failed");
+    host = document.createElement("div");
+    document.body.append(host);
+    await act(async () => {
+      render(<App bridge={bridge} initialTab="settings" />, host);
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    const form = host.querySelector<HTMLFormElement>("#origin")?.closest("form");
+    expect(form).toBeTruthy();
+    await act(async () => {
+      form!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    });
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+    expect(text()).toContain("Couldn't stop your live report link. Stop it on mythics.gg under Your logs.");
+  });
+
   it("says what failed, in its own words, and tries again", async () => {
     const bridge = await mount(withShare({ status: "error", error: "offline" }));
     expect(card()?.textContent).toContain("Couldn't make your live report link. Couldn't reach mythics.gg.");
